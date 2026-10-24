@@ -1,7 +1,8 @@
 // ?bench: a fixed, scripted frame-rate measurement for a Strata page.
 //
 // Open the page with ?bench and, once it has loaded, it flies a fixed camera
-// path for 15 seconds (a 1-second warm-up first), timing every frame, then
+// path for 15 seconds (after a warm-up of at least 1 second and 30 frames at
+// the start of the path), timing every frame, then
 // shows a card with the results and a "Copy results" button. Nothing is sent
 // anywhere: the numbers stay on the screen and on the clipboard.
 //
@@ -21,15 +22,15 @@
 //   scene    what is drawn (a dataset, a world, a replay)
 //   canvas   the engine's canvas
 //   setup()  puts the page in its fixed starting state (optional)
-//   path(u)  puts the camera where the path is at u (0 at the start of the
-//            warm-up, 1 at the end of the run); called once per frame
+//   path(u)  puts the camera where the path is at u: 0 through the warm-up,
+//            then from 0 to 1 over the measured run; called once per frame
 //   onDone() (optional) after the card is shown
 // It returns false when the page was not opened with ?bench.
 'use strict';
 (function () {
   const params = new URLSearchParams(location.search);
   const requested = params.has('bench');
-  const WARMUP_MS = 1000;
+  const WARMUP_MS = 1000, WARMUP_FRAMES = 30;
   const RUN_MS = Math.min(60000, Math.max(3000, (Number(params.get('bench')) || 15) * 1000));
 
   const nativeRaf = window.requestAnimationFrame.bind(window);
@@ -132,7 +133,8 @@
   color: #e9edf4; background: #232a3a; border: 1px solid #4a5572; touch-action: manipulation; }
 #strata-bench button.primary { background: #2f6fde; border-color: #2f6fde; color: #fff; flex: 1 1 auto; }
 #strata-bench button:focus-visible { outline: 2px solid #ffc23a; outline-offset: 2px; }
-#strata-bench .note { margin-top: 8px; min-height: 1.4em; color: #ffc23a; font-size: 13px; }`;
+#strata-bench .note { margin-top: 8px; color: #ffc23a; font-size: 13px; }
+#strata-bench .note:empty { margin: 0; }`;
 
   function el(tag, attrs, text) {
     const e = document.createElement(tag);
@@ -212,27 +214,30 @@
     let hidden = false;
     const onHidden = () => { if (document.hidden) hidden = true; };
     document.addEventListener('visibilitychange', onHidden);
-    const total = WARMUP_MS + RUN_MS;
-    let t0 = null, last = null, lastSecond = -1, runStart = null, runFrames = 0;
+    let t0 = null, last = null, lastLabel = '', runStart = null, runStartNow = 0, runFrames = 0, warmFrames = 0;
 
     await new Promise((resolve) => {
       const tick = (ts) => {
         const now = performance.now();
         if (t0 === null) t0 = now;
-        const elapsed = now - t0;
-        try { opts.path(Math.min(1, elapsed / total)); } catch (e) { console.warn('bench path:', e); }
-        if (elapsed >= WARMUP_MS) {
-          if (runStart === null) { runStart = ts; measuring = true; cpuByFrame.clear(); }
-          else { intervals.push(ts - last); runFrames++; }
+        if (runStart === null && now - t0 >= WARMUP_MS && warmFrames >= WARMUP_FRAMES) {
+          runStart = ts;
+          runStartNow = now;
+          measuring = true;
+          cpuByFrame.clear();
+        } else if (runStart !== null) {
+          intervals.push(ts - last);
+          runFrames++;
+        } else {
+          warmFrames++;
         }
         last = ts;
+        const run = runStart === null ? 0 : now - runStartNow;
+        try { opts.path(Math.min(1, run / RUN_MS)); } catch (e) { console.warn('bench path:', e); }
         pollQueries();
-        const left = Math.ceil((total - elapsed) / 1000);
-        if (left !== lastSecond) {
-          lastSecond = left;
-          pill.textContent = elapsed < WARMUP_MS ? 'Benchmark: warming up…' : `Benchmark: ${left} s left`;
-        }
-        if (elapsed >= total) { measuring = false; resolve(); return; }
+        const label = runStart === null ? 'Benchmark: warming up…' : `Benchmark: ${Math.ceil((RUN_MS - run) / 1000)} s left`;
+        if (label !== lastLabel) pill.textContent = lastLabel = label;
+        if (run >= RUN_MS) { measuring = false; resolve(); return; }
         nativeRaf(tick);
       };
       nativeRaf(tick);
@@ -268,7 +273,7 @@
     };
     const lines = [
       `strata-bench 1 · ${opts.name} ${version}`,
-      `scene: ${opts.scene} (${RUN_MS / 1000} s path after a ${WARMUP_MS / 1000} s warm-up)`,
+      `scene: ${opts.scene} (${RUN_MS / 1000} s path after a ${warmFrames}-frame warm-up)`,
       `fps: ${fps.toFixed(1)} (${runFrames} frames in ${(elapsedMs / 1000).toFixed(2)} s)`,
       `frame time: median ${ms(interval && interval.median)}, p95 ${ms(interval && interval.p95)}, p99 ${ms(interval && interval.p99)}, max ${ms(interval && interval.max)}; ${slowFrames} over 2× median`,
       `page work: ${cpu ? `median ${ms(cpu.median)}, p95 ${ms(cpu.p95)}, max ${ms(cpu.max)}` : 'n/a'}`,
@@ -291,5 +296,5 @@
     return true;
   }
 
-  window.StrataBench = { requested, run, durationMs: WARMUP_MS + RUN_MS };
+  window.StrataBench = { requested, run, runMs: RUN_MS };
 })();

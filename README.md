@@ -152,7 +152,7 @@ and 3).
 
 To measure the frame rate on a real device, open the page with `?bench`
 (<https://asn1-viz.play.danielstephenson.dev/?bench>). It flies one fixed
-orbit of the PKIX city for 15 seconds after a 1-second warm-up, then shows the
+orbit of the PKIX city for 15 seconds after a short warm-up, then shows the
 frame rate, the frame time (median and p95), the page's own work per frame,
 the GPU time where the browser offers WebGL 2 timer queries, the canvas size
 and device pixel ratio and the GPU's name, with a button that copies it all as
