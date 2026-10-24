@@ -30,7 +30,8 @@ struct Overlay {
 };
 
 // Uploads a MeshBuilder to the engine and returns the mesh id (0 if empty).
-uint32_t uploadMesh(strata::Engine& engine, const MeshBuilder& mesh);
+// `unlit` draws it without lighting or shadows (a glow, ABI 1.7).
+uint32_t uploadMesh(strata::Engine& engine, const MeshBuilder& mesh, bool unlit = false);
 
 class Scene {
 public:
@@ -44,6 +45,9 @@ public:
     virtual void pick(const StrataRayHit& hit) = 0;
     // This frame's lines and labels.
     virtual void draw(Overlay& overlay, const CameraMatrices& camera, int width, int height) = 0;
+    // Called before each frame: a scene whose meshes depend on the selection
+    // (a highlight) updates them here.
+    virtual void sync(strata::Engine& engine) { (void)engine; }
     // A key press the shell did not use; true if the scene did.
     virtual bool key(int32_t scancode) {
         (void)scancode;

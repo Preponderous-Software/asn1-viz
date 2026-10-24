@@ -11,6 +11,7 @@ namespace {
 constexpr int32_t kScanEscape = 41;
 constexpr int32_t kScanHome = 74;
 constexpr int32_t kScanH = 11;
+constexpr int32_t kScanF = 9;
 
 }  // namespace
 
@@ -45,7 +46,7 @@ void Overlay::clear() {
     strings.clear();
 }
 
-uint32_t uploadMesh(strata::Engine& engine, const MeshBuilder& mesh) {
+uint32_t uploadMesh(strata::Engine& engine, const MeshBuilder& mesh, bool unlit) {
     if (mesh.empty()) return 0;
     StrataMesh m{};
     m.positions = mesh.positions().data();
@@ -55,6 +56,13 @@ uint32_t uploadMesh(strata::Engine& engine, const MeshBuilder& mesh) {
     m.vertex_count = mesh.vertexCount();
     m.index_count = static_cast<int32_t>(mesh.indices().size());
     m.color[0] = m.color[1] = m.color[2] = m.color[3] = 1;
+    if (unlit) {
+        StrataTexturedMesh t{};
+        t.mesh = m;
+        t.texture = 0;
+        t.flags = STRATA_MESH_UNLIT;
+        return engine.addTexturedMesh(t);
+    }
     return engine.addMesh(m);
 }
 
@@ -134,7 +142,7 @@ void Shell::handle(const StrataEvent& e) {
         case STRATA_EVENT_KEY_DOWN:
             if (e.scancode == kScanEscape) quit_ = true;
             else if (e.scancode == kScanHome || e.scancode == kScanH) home();
-            else scene_.key(e.scancode);
+            else if (scene_.key(e.scancode) && e.scancode == kScanF) lookAtFocus();
             break;
         default: break;
     }
@@ -153,6 +161,7 @@ void Shell::frame() {
     cam.far_plane = camera_.farPlane;
     engine_.setCamera(cam);
 
+    scene_.sync(engine_);
     overlay_.clear();
     scene_.draw(overlay_, m, width_, height_);
 

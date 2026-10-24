@@ -36,11 +36,16 @@ jobs:
         run: cmake --build build -j4
       - name: Tests
         run: ctest --test-dir build --output-on-failure
-      - name: Headless render
+      - name: Headless renders and ray picking
         run: |
           mkdir -p shots
-          ./build/asn1-viz --headless --shot shots/test-pattern.png
-          test -s shots/test-pattern.png
+          ./build/asn1-viz datasets/pkix/certificate.layout.json --headless --shot shots/pkix-strips.png \
+            --pick Certificate.tbsCertificate.validity --links 2 | tee pick.log
+          grep -q 'selected Certificate.tbsCertificate.validity' pick.log
+          # A real click through strata_raycast_meshes: the pixel lands on period's length.
+          ./build/asn1-viz datasets/demo/msg.layout.json --headless --shot shots/demo-click.png --click 330 330 | tee click.log
+          grep -q 'selected Msg.period' click.log
+          test -s shots/pkix-strips.png && test -s shots/demo-click.png
       - uses: actions/upload-artifact@v4
         with:
           name: shots-linux
