@@ -2,13 +2,20 @@
  *
  *   asn1-viz-extract --value FILE --value-codec der|ber|xer|jer|uper|aper
  *                    [--codecs uper,aper] [--schema NAME]... [--out FILE]
+ *                    [--import FILE.per [--canonical]]
  *
  * The PDU is fixed at build time (one extractor per schema and PDU; see
  * asn1viz_add_extractor in CMakeLists.txt). The value is decoded with the
  * generated codec, then encoded once per codec with the tracer on. Every
  * lane must pass the self-test (segments tile the stream, traced bytes equal
  * untraced bytes, the root span equals the encoded length); if one fails,
- * nothing is written and the exit status is 1. */
+ * nothing is written and the exit status is 1.
+ *
+ * --import adds a lane laid out from the decoder side: an existing UPER
+ * encoding, decoded in the fork's lenient canonical mode. With --canonical,
+ * it is also decoded in strict canonical mode (ctx.uper_canonical), and the
+ * lane says whether that accepted it and, if not, in which field and at
+ * which bit the check fired (RFC 0023 section 2.7). */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -61,11 +68,14 @@ static int syntax_of(const char *codec, enum asn_transfer_syntax *out) {
 static void usage(void) {
     fprintf(stderr,
             "usage: asn1-viz-extract --value FILE --value-codec der|ber|xer|jer|uper|aper\n"
-            "                        [--codecs uper,aper] [--schema NAME]... [--out FILE]\n");
+            "                        [--codecs uper,aper] [--schema NAME]... [--out FILE]\n"
+            "                        [--import FILE.per [--canonical]]\n");
 }
 
 int main(int argc, char **argv) {
     const char *value_path = NULL, *value_codec = NULL, *codecs = "uper,aper", *out_path = NULL;
+    const char *import_path = NULL;
+    int canonical = 0;
     const char *schemas[32];
     int nschemas = 0;
     for(int i = 1; i < argc; i++) {
@@ -76,6 +86,8 @@ int main(int argc, char **argv) {
         else if(!strcmp(a, "--codecs") && v) codecs = argv[++i];
         else if(!strcmp(a, "--out") && v) out_path = argv[++i];
         else if(!strcmp(a, "--schema") && v && nschemas < 32) schemas[nschemas++] = argv[++i];
+        else if(!strcmp(a, "--import") && v) import_path = argv[++i];
+        else if(!strcmp(a, "--canonical")) canonical = 1;
         else {
             usage();
             return 2;
@@ -109,7 +121,7 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    int ncodecs = 0, codec_list[2];
+    int ncodecs = 0, codec_list[3];
     if(strstr(codecs, "uper")) codec_list[ncodecs++] = ASN1VIZ_UPER;
     if(strstr(codecs, "aper")) codec_list[ncodecs++] = ASN1VIZ_APER;
     if(!ncodecs) {
@@ -118,7 +130,7 @@ int main(int argc, char **argv) {
     }
 
     int tables = asn1viz_trace_install(asn1viz_pdu);
-    asn1viz_lane_t lanes[2];
+    asn1viz_lane_t lanes[3];
     int failed = 0;
     for(int i = 0; i < ncodecs; i++) {
         if(asn1viz_trace_encode(asn1viz_pdu, value, codec_list[i], &lanes[i])) {
@@ -130,6 +142,26 @@ int main(int argc, char **argv) {
                     codec_list[i] ? "APER" : "UPER", lanes[i].encoded_bits, lanes[i].nframes, lanes[i].nsegments,
                     tables);
         }
+    }
+    uint8_t *imported = NULL;
+    if(import_path) {
+        size_t ilen = 0;
+        imported = read_file(import_path, &ilen);
+        if(!imported) {
+            fprintf(stderr, "asn1-viz-extract: cannot read %s\n", import_path);
+            return 1;
+        }
+        asn1viz_lane_t *l = &lanes[ncodecs];
+        if(asn1viz_trace_decode_uper(asn1viz_pdu, imported, ilen, base_name(import_path), canonical, l)) {
+            fprintf(stderr, "asn1-viz-extract: imported UPER self-test failed: %s\n", l->error);
+            failed = 1;
+        } else {
+            fprintf(stderr, "asn1-viz-extract: imported UPER %zu bits, %zu frames, %zu segments%s%s%s\n",
+                    l->encoded_bits, l->nframes, l->nsegments, l->canonical.present ? "; canonical: " : "",
+                    l->canonical.present ? l->canonical.result : "",
+                    l->canonical.present && !strcmp(l->canonical.result, "rejected") ? " (strict)" : "");
+        }
+        codec_list[ncodecs++] = -1; /* marks the imported lane */
     }
     asn1viz_trace_restore();
     if(failed) return 1;
@@ -164,5 +196,6 @@ int main(int argc, char **argv) {
     if(out != stdout) fclose(out);
     ASN_STRUCT_FREE(*asn1viz_pdu, value);
     free(data);
+    free(imported);
     return 0;
 }

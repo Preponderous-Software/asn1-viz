@@ -45,7 +45,11 @@ jobs:
           # A real click through strata_raycast_meshes: the pixel lands on period's length.
           ./build/asn1-viz datasets/demo/msg.layout.json --headless --shot shots/demo-click.png --click 330 330 | tee click.log
           grep -q 'selected Msg.period' click.log
-          test -s shots/pkix-strips.png && test -s shots/demo-click.png
+          # The canonical overlay: the strict check's field, in the imported lane.
+          ./build/asn1-viz datasets/pkix/certificate-canonical.layout.json --headless --shot shots/pkix-canonical.png \
+            --pick Certificate.tbsCertificate.serialNumber --lane 1 --links 3 | tee canon.log
+          grep -q 'selected Certificate.tbsCertificate.serialNumber' canon.log
+          test -s shots/pkix-strips.png && test -s shots/demo-click.png && test -s shots/pkix-canonical.png
       - uses: actions/upload-artifact@v4
         with:
           name: shots-linux

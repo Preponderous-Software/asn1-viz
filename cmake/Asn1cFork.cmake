@@ -168,7 +168,10 @@ set(ASN1VIZ_WRAPPED_SYMBOLS
   uper_put_length uper_put_nslength uper_put_nsnnwn
   aper_put_length aper_put_nslength aper_put_nsnnwn aper_put_align
   uper_open_type_put aper_open_type_put
-  SET_OF__encode_sorted)
+  SET_OF__encode_sorted
+  asn_get_few_bits asn_get_many_bits
+  uper_get_length uper_get_nslength uper_get_nsnnwn
+  uper_open_type_get uper_open_type_skip)
 
 # asn1viz_add_extractor(<name> PDU <Type> SCHEMAS <file>... [FLAGS <flag>...])
 #

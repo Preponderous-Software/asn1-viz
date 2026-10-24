@@ -16,6 +16,10 @@ const float kDim[4] = {0.62f, 0.66f, 0.74f, 1};
 const float kSegLine[4] = {1, 1, 1, 1};
 const float kLink[4] = {1, 0.82f, 0.3f, 0.9f};
 const float kTick[4] = {0.5f, 0.55f, 0.65f, 0.35f};
+const float kAlarm[4] = {1, 0.25f, 0.2f, 1};
+const float kGood[4] = {0.4f, 0.95f, 0.5f, 1};
+
+bool rejected(const LayoutLane& l) { return l.canonical.result == "rejected"; }
 
 std::string withCommas(int64_t v) {
     std::string s = std::to_string(v), out;
@@ -117,6 +121,24 @@ void StripView::sync(strata::Engine& engine) {
 void StripView::upload(strata::Engine& engine) {
     glowId_ = 0;
     glowDirty_ = true;
+    // The canonical overlay (RFC 0023 G4): the field where the strict check
+    // fired, capped in red.
+    MeshBuilder alarm;
+    for (size_t l = 0; l < strips_.laneCount(); ++l) {
+        const LayoutLane& lane = strips_.layout().lanes[l];
+        if (!rejected(lane) || lane.canonical.frame < 0) continue;
+        const LayoutFrame& f = lane.frames[static_cast<size_t>(lane.canonical.frame)];
+        for (int64_t b = f.start; b < f.end; ++b) {
+            const int s = lane.segmentAt(b);
+            if (s < 0) continue;
+            const float top = strips_.segmentHeight(l, s) + (lane.bit(b) == 1 ? strips_.style().oneBonus : 0.0f);
+            const BitPlace p = strips_.place(l, b);
+            // Above the selection's glow (which can be on the same field).
+            const float lo[3] = {p.x0 + 0.03f, top + 0.27f, p.z0 + 0.05f}, hi[3] = {p.x1 - 0.03f, top + 0.37f, p.z1 - 0.05f};
+            alarm.addBox(lo, hi, {1, 0.18f, 0.14f}, {1, 0.18f, 0.14f}, -1);
+        }
+    }
+    alarmId_ = uploadMesh(engine, alarm, true);
     meshIds_.clear();
     for (size_t l = 0; l < strips_.laneCount(); ++l) meshIds_.push_back(uploadMesh(engine, strips_.laneMesh(l)));
 }
@@ -223,12 +245,33 @@ void StripView::draw(Overlay& o, const CameraMatrices& cam, int w, int h) {
         const Vec3 p{strips_.laneX0(l) + strips_.laneWidth() / 2, 0, -1.5f};
         if (!toScreen(cam, p, w, h, x, y)) continue;
         std::string t = upper(lane.codec) + "  " + withCommas(lane.encodedBits) + " bits";
-        if (!lane.source.empty()) t += "  (" + lane.source + ")";
+        if (!lane.source.empty()) t = "imported " + t;
         const float tw = 16.0f * static_cast<float>(t.size());
-        const Rect r{x - tw / 2, y - 24, x + tw / 2, y - 8};
+        const float lift = lane.canonical.result.empty() && lane.source.empty() ? 0.0f : 24.0f;
+        const Rect r{x - tw / 2, y - 24 - lift, x + tw / 2, y - 8 - lift};
         if (!overlaps(taken, r)) {
             o.text(r.x0, r.y0, 16, t, kInk);
             taken.push_back(r);
+        }
+        if (!lane.source.empty() || !lane.canonical.result.empty()) {
+            std::string c = lane.source;
+            if (!lane.canonical.result.empty())
+                c += rejected(lane) ? "   canonical UPER: REJECTED (lenient: " + lane.canonical.lenient + ")"
+                                    : "   canonical UPER: ok";
+            const float cw = 8.0f * static_cast<float>(c.size());
+            o.text(x - cw / 2, y - 26, 8, c, rejected(lane) ? kAlarm : (lane.canonical.result.empty() ? kDim : kGood));
+        }
+        // Where the strict check fired: a red post at that bit, and the rule.
+        if (rejected(lane)) {
+            const Vec3 a = strips_.anchor(l, std::min<int64_t>(lane.canonical.bit, lane.bits - 1), 0);
+            const Vec3 b{a.x, 9, a.z};
+            o.line(a, b, kAlarm);
+            float bx, by;
+            if (toScreen(cam, b, w, h, bx, by)) {
+                const std::string what = "strict check fired here, bit " + withCommas(lane.canonical.bit);
+                o.text(bx + 6, by - 10, 8, what, kAlarm);
+                if (!lane.canonical.rule.empty()) o.text(bx + 6, by + 2, 8, lane.canonical.rule, kAlarm);
+            }
         }
     }
 
@@ -316,6 +359,10 @@ void StripView::draw(Overlay& o, const CameraMatrices& cam, int w, int h) {
         const auto at = where_.find(f.type);
         if (at != where_.end()) typeLine += "  (" + at->second + ")";
         line(typeLine, kDim);
+        if (rejected(lane) && lane.canonical.frame == selFrame_) {
+            line("canonical UPER: REJECTED in this field (strict; lenient: " + lane.canonical.lenient + ")", kAlarm);
+            line(lane.canonical.rule, kAlarm, 8);
+        }
         if (wholeFrame_) {
             line("field  bits [" + withCommas(f.start) + ", " + withCommas(f.end) + ")  " +
                      withCommas(f.end - f.start) + " bits",

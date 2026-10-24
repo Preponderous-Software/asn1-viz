@@ -16,6 +16,9 @@ from PIL import Image, ImageDraw
 KIND_COLORS = {
     "value": (86, 156, 214),
     "presence-bit": (240, 200, 60),
+    "presence-bitmap": (240, 200, 60),
+    "undecoded": (150, 20, 20),
+    "open-type-unknown": (180, 70, 90),
     "extension-bit": (240, 120, 40),
     "extension-bitmap": (240, 150, 60),
     "extension-bitmap-length": (200, 110, 50),

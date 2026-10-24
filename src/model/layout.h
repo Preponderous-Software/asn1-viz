@@ -28,7 +28,8 @@ struct LayoutSegment {
 // The canonical-UPER overlay on an imported lane (RFC 0023 G4, section 2.7).
 struct CanonicalCheck {
     std::string result;     // "ok", "rejected" or "warned"; empty when there is none
-    std::string mode;       // "strict" or "lenient"
+    std::string mode;       // "strict"
+    std::string lenient;    // the lenient mode's answer: "accepted" or "rejected"
     int frame = -1;         // the frame open when the check fired
     int64_t bit = -1;       // the bit position the decoder had reached
     std::string rule;       // which X.691 rule, as far as the extractor can tell

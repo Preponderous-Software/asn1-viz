@@ -108,11 +108,30 @@ if(ASN1VIZ_WITH_ASN1C)
     DEPENDS asn1-viz-extract-pkix
     COMMENT "Laying out the PKIX sample certificate")
 
-  add_custom_target(datasets ALL DEPENDS "${DEMO_LAYOUT}" "${PKIX_LAYOUT}")
+  # The canonical-UPER overlay (RFC 0023 G4): the same certificate with its
+  # serialNumber widened by one redundant octet (non-canonical, X.691
+  # 11.3.6), imported and checked by the fork's strict canonical decoder.
+  add_executable(asn1-viz-widen-integer tools/widen_integer.cpp)
+  target_link_libraries(asn1-viz-widen-integer PRIVATE asn1viz_model)
+  asn1viz_warnings(asn1-viz-widen-integer)
+  set(PKIX_NONCANONICAL_PER "${ASN1VIZ_DATASETS_OUT}/pkix/sample-Certificate-1-noncanonical.per")
+  set(PKIX_CANONICAL_LAYOUT "${ASN1VIZ_DATASETS_OUT}/pkix/certificate-canonical.layout.json")
+  add_custom_command(OUTPUT "${PKIX_NONCANONICAL_PER}"
+    COMMAND asn1-viz-widen-integer "${PKIX_LAYOUT}" 0 Certificate.tbsCertificate.serialNumber "${PKIX_NONCANONICAL_PER}"
+    DEPENDS asn1-viz-widen-integer "${PKIX_LAYOUT}"
+    COMMENT "Making a non-canonical copy of the sample certificate's UPER")
+  add_custom_command(OUTPUT "${PKIX_CANONICAL_LAYOUT}"
+    COMMAND asn1-viz-extract-pkix --value "${PKIX_SAMPLES}/sample-Certificate-1.der" --value-codec der --codecs uper
+            ${_pkix_schema_args} --import "${PKIX_NONCANONICAL_PER}" --canonical --out "${PKIX_CANONICAL_LAYOUT}"
+    DEPENDS asn1-viz-extract-pkix "${PKIX_NONCANONICAL_PER}"
+    COMMENT "Laying out the non-canonical certificate against the canonical one")
+
+  add_custom_target(datasets ALL DEPENDS "${DEMO_LAYOUT}" "${PKIX_LAYOUT}" "${PKIX_CANONICAL_LAYOUT}")
   # Copies the regenerated, redistributable datasets into datasets/ (commit them).
   add_custom_target(update-datasets
     COMMAND ${CMAKE_COMMAND} -E copy "${PKIX_LAYOUT}" "${CMAKE_CURRENT_SOURCE_DIR}/datasets/pkix/certificate.layout.json"
     COMMAND ${CMAKE_COMMAND} -E copy "${DEMO_LAYOUT}" "${CMAKE_CURRENT_SOURCE_DIR}/datasets/demo/msg.layout.json"
+    COMMAND ${CMAKE_COMMAND} -E copy "${PKIX_CANONICAL_LAYOUT}" "${CMAKE_CURRENT_SOURCE_DIR}/datasets/pkix/certificate-canonical.layout.json"
     DEPENDS datasets)
 
   if(ASN1VIZ_BUILD_TESTS)
@@ -127,10 +146,26 @@ if(ASN1VIZ_WITH_ASN1C)
     asn1viz_warnings(test_extractor)
     add_test(NAME extractor COMMAND test_extractor "${DEMO_LAYOUT}" "${PKIX_LAYOUT}"
              "${PKIX_SAMPLES}/sample-Certificate-1.per" "${PKIX_SAMPLES}/sample-Certificate-1.aper")
+    # The decoder side on the fork's own canonical sample: it lays out exactly
+    # as the encoder side does, and the strict canonical check accepts it.
+    set(PKIX_IMPORTED_LAYOUT "${ASN1VIZ_DATASETS_OUT}/pkix/imported-sample.layout.json")
+    add_custom_command(OUTPUT "${PKIX_IMPORTED_LAYOUT}"
+      COMMAND asn1-viz-extract-pkix --value "${PKIX_SAMPLES}/sample-Certificate-1.der" --value-codec der --codecs uper
+              --import "${PKIX_SAMPLES}/sample-Certificate-1.per" --canonical --out "${PKIX_IMPORTED_LAYOUT}"
+      DEPENDS asn1-viz-extract-pkix)
+    add_custom_target(imported-sample ALL DEPENDS "${PKIX_IMPORTED_LAYOUT}")
+    add_executable(test_canonical tests/test_canonical.cpp)
+    target_link_libraries(test_canonical PRIVATE asn1viz_model)
+    target_include_directories(test_canonical PRIVATE tests)
+    asn1viz_warnings(test_canonical)
+    add_test(NAME canonical COMMAND test_canonical "${PKIX_IMPORTED_LAYOUT}" "${PKIX_CANONICAL_LAYOUT}")
     # The committed PKIX layout is what the pinned fork produces today.
     add_test(NAME pkix_layout_up_to_date
              COMMAND ${CMAKE_COMMAND} -E compare_files "${PKIX_LAYOUT}"
                      "${CMAKE_CURRENT_SOURCE_DIR}/datasets/pkix/certificate.layout.json")
+    add_test(NAME pkix_canonical_layout_up_to_date
+             COMMAND ${CMAKE_COMMAND} -E compare_files "${PKIX_CANONICAL_LAYOUT}"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/datasets/pkix/certificate-canonical.layout.json")
     add_test(NAME demo_layout_up_to_date
              COMMAND ${CMAKE_COMMAND} -E compare_files "${DEMO_LAYOUT}"
                      "${CMAKE_CURRENT_SOURCE_DIR}/datasets/demo/msg.layout.json")
