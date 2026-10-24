@@ -70,12 +70,13 @@ jobs:
           npm ci
           npx playwright install --with-deps chromium
 
-      - name: Smoke test (desktop, then iPhone 13 profile)
+      - name: Smoke test (desktop, iPhone 13 profile, a DPR-2 phone)
         run: |
           python3 -m http.server 8080 --bind 127.0.0.1 --directory web-site > http.log 2>&1 &
           sleep 1
           node web/smoke/smoke.cjs http://127.0.0.1:8080/ smoke-out/desktop
           node web/smoke/smoke.cjs http://127.0.0.1:8080/ smoke-out/phone --phone
+          node web/smoke/smoke.cjs http://127.0.0.1:8080/ smoke-out/phone-dpr2 --phone --dpr 2
 
       - name: Upload the site and the smoke screenshots
         if: always()

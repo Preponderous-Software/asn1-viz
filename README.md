@@ -144,9 +144,11 @@ city. Drag to orbit, right-drag or two fingers to pan, wheel or the +/-
 buttons to zoom, and click or tap to pick. On a narrow screen the pick panel
 moves from the canvas into a sheet under it, and the canvas draws at most two
 pixels per CSS pixel. CI builds the page, runs the tests under Node, and
-smoke-tests it in headless Chromium on a desktop and an iPhone 13 profile.
-Every dataset must open and draw, and a real click or tap must change the
-selection.
+smoke-tests it in headless Chromium on a desktop, an iPhone 13 profile and a
+phone at device pixel ratio 2. Every dataset must open and draw, a real click
+or tap must change the selection, and a click or tap on a block must pick the
+same block as the page's own pick call at that point (device pixel ratios 1, 2
+and 3).
 
 ## The extractor
 
