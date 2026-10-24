@@ -17,6 +17,19 @@ in this repository: each is fetched at a pinned commit at build time.
   include the skeletons and are therefore covered by BSD-2-Clause as well as
   MIT.
 
+### Data derived from the fork
+
+- `datasets/pkix/*.json`: layouts and the schema walk of RFC 3280's
+  `PKIX1Explicit88`/`PKIX1Implicit88` modules (extracted at build time from
+  the fork's `examples/rfc3280.txt`) and of the fork's sample certificate
+  (`examples/sample.source.PKIX1/sample-Certificate-1.der`). RFC 3280's Full
+  Copyright Statement permits derivative works that assist in its
+  implementation, with the notice kept: Copyright (C) The Internet Society
+  (2002). All Rights Reserved.
+- `datasets/recursion/schema.json`: the schema walk of the fork's test schema
+  `tests/tests-asn1c-compiler/92-circular-loops-OK.asn1` (BSD-2-Clause, as
+  above).
+
 ## Strata (MIT)
 
 - Source: <https://github.com/Preponderous-Software/strata>, pinned in

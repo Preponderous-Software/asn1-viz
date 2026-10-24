@@ -54,15 +54,17 @@ endfunction()
 add_library(asn1viz_model STATIC
   src/model/json.cpp
   src/model/layout.cpp
+  src/model/schema.cpp
   src/scene/camera.cpp
   src/scene/mesh.cpp
-  src/scene/strip.cpp)
+  src/scene/strip.cpp
+  src/scene/city.cpp)
 target_include_directories(asn1viz_model PUBLIC src)
 asn1viz_warnings(asn1viz_model)
 
 if(ASN1VIZ_BUILD_TESTS)
   enable_testing()
-  foreach(t json mesh camera layout strip)
+  foreach(t json mesh camera layout strip schema city)
     add_executable(test_${t} tests/test_${t}.cpp)
     target_link_libraries(test_${t} PRIVATE asn1viz_model)
     target_include_directories(test_${t} PRIVATE tests)
@@ -126,12 +128,35 @@ if(ASN1VIZ_WITH_ASN1C)
     DEPENDS asn1-viz-extract-pkix "${PKIX_NONCANONICAL_PER}"
     COMMENT "Laying out the non-canonical certificate against the canonical one")
 
-  add_custom_target(datasets ALL DEPENDS "${DEMO_LAYOUT}" "${PKIX_LAYOUT}" "${PKIX_CANONICAL_LAYOUT}")
+  # The schema walker (RFC 0024 C1): asn1c's own parser and fixer, walked.
+  add_executable(asn1-viz-schema schema/walk.c)
+  target_link_libraries(asn1-viz-schema PRIVATE asn1c::fix asn1c::parser asn1c::common)
+  target_compile_definitions(asn1-viz-schema PRIVATE ASN1VIZ_ASN1C_COMMIT="${ASN1VIZ_ASN1C_REF}")
+  set(PKIX_SCHEMA "${ASN1VIZ_DATASETS_OUT}/pkix/schema.json")
+  add_custom_command(OUTPUT "${PKIX_SCHEMA}"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${ASN1VIZ_DATASETS_OUT}/pkix"
+    COMMAND asn1-viz-schema --out "${PKIX_SCHEMA}" ${PKIX_MODULES}
+    DEPENDS asn1-viz-schema
+    COMMENT "Walking the PKIX modules")
+  # The recursion demo (RFC 0024 OQ3): the fork's richest circular test schema.
+  set(ASN1C_COMPILER_TESTS "${ASN1C_SOURCE_DIR}/tests/tests-asn1c-compiler")
+  set(RECURSION_SCHEMA "${ASN1VIZ_DATASETS_OUT}/recursion/schema.json")
+  add_custom_command(OUTPUT "${RECURSION_SCHEMA}"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${ASN1VIZ_DATASETS_OUT}/recursion"
+    COMMAND asn1-viz-schema --out "${RECURSION_SCHEMA}" "${ASN1C_COMPILER_TESTS}/92-circular-loops-OK.asn1"
+    DEPENDS asn1-viz-schema
+    COMMENT "Walking 92-circular-loops-OK.asn1")
+
+  add_custom_target(datasets ALL DEPENDS "${DEMO_LAYOUT}" "${PKIX_LAYOUT}" "${PKIX_CANONICAL_LAYOUT}"
+                                          "${PKIX_SCHEMA}" "${RECURSION_SCHEMA}")
   # Copies the regenerated, redistributable datasets into datasets/ (commit them).
   add_custom_target(update-datasets
     COMMAND ${CMAKE_COMMAND} -E copy "${PKIX_LAYOUT}" "${CMAKE_CURRENT_SOURCE_DIR}/datasets/pkix/certificate.layout.json"
     COMMAND ${CMAKE_COMMAND} -E copy "${DEMO_LAYOUT}" "${CMAKE_CURRENT_SOURCE_DIR}/datasets/demo/msg.layout.json"
     COMMAND ${CMAKE_COMMAND} -E copy "${PKIX_CANONICAL_LAYOUT}" "${CMAKE_CURRENT_SOURCE_DIR}/datasets/pkix/certificate-canonical.layout.json"
+    COMMAND ${CMAKE_COMMAND} -E copy "${PKIX_SCHEMA}" "${CMAKE_CURRENT_SOURCE_DIR}/datasets/pkix/schema.json"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_SOURCE_DIR}/datasets/recursion"
+    COMMAND ${CMAKE_COMMAND} -E copy "${RECURSION_SCHEMA}" "${CMAKE_CURRENT_SOURCE_DIR}/datasets/recursion/schema.json"
     DEPENDS datasets)
 
   if(ASN1VIZ_BUILD_TESTS)
@@ -166,6 +191,19 @@ if(ASN1VIZ_WITH_ASN1C)
     add_test(NAME pkix_canonical_layout_up_to_date
              COMMAND ${CMAKE_COMMAND} -E compare_files "${PKIX_CANONICAL_LAYOUT}"
                      "${CMAKE_CURRENT_SOURCE_DIR}/datasets/pkix/certificate-canonical.layout.json")
+    add_test(NAME pkix_schema_up_to_date
+             COMMAND ${CMAKE_COMMAND} -E compare_files "${PKIX_SCHEMA}" "${CMAKE_CURRENT_SOURCE_DIR}/datasets/pkix/schema.json")
+    add_test(NAME recursion_schema_up_to_date
+             COMMAND ${CMAKE_COMMAND} -E compare_files "${RECURSION_SCHEMA}"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/datasets/recursion/schema.json")
+    # RFC 0024 C1's gate: the fork's three recursion tests show their cycles.
+    foreach(t 43-recursion-OK 73-circular-OK 92-circular-loops-OK)
+      add_test(NAME walk_${t} COMMAND asn1-viz-schema --out "${ASN1VIZ_DATASETS_OUT}/${t}.schema.json"
+                                      "${ASN1C_COMPILER_TESTS}/${t}.asn1")
+    endforeach()
+    set_tests_properties(walk_43-recursion-OK PROPERTIES PASS_REGULAR_EXPRESSION "4 references .* 3 recursive groups")
+    set_tests_properties(walk_73-circular-OK PROPERTIES PASS_REGULAR_EXPRESSION "6 references .* 1 recursive groups")
+    set_tests_properties(walk_92-circular-loops-OK PROPERTIES PASS_REGULAR_EXPRESSION "30 references .* 3 recursive groups")
     add_test(NAME demo_layout_up_to_date
              COMMAND ${CMAKE_COMMAND} -E compare_files "${DEMO_LAYOUT}"
                      "${CMAKE_CURRENT_SOURCE_DIR}/datasets/demo/msg.layout.json")
@@ -189,7 +227,7 @@ if(ASN1VIZ_WITH_STRATA OR ASN1VIZ_WEB)
     GIT_TAG ${ASN1VIZ_STRATA_REF})
   FetchContent_MakeAvailable(strata)
 
-  add_library(asn1viz_view STATIC src/view/shell.cpp src/view/strip_view.cpp)
+  add_library(asn1viz_view STATIC src/view/shell.cpp src/view/strip_view.cpp src/view/city_view.cpp)
   target_include_directories(asn1viz_view PUBLIC src)
   target_link_libraries(asn1viz_view PUBLIC asn1viz_model strata::static)
   asn1viz_warnings(asn1viz_view)
