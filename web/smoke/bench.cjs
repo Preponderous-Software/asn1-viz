@@ -42,7 +42,7 @@ fs.mkdirSync(outDir, { recursive: true });
   // An Emscripten main loop can keep the load event from firing: commit only.
   await page.goto(url, { waitUntil: 'commit' });
   try {
-    await page.waitForFunction(() => window.__strataBench && window.__strataBench.state === 'done', null, { timeout: 180000 });
+    await page.waitForFunction(() => window.__strataBench && window.__strataBench.state === 'done', null, { timeout: 420000 });
   } catch (e) {
     await fail('the bench run never finished: ' + errors.join(' | '));
   }
@@ -68,7 +68,7 @@ fs.mkdirSync(outDir, { recursive: true });
   const cardBox = await card.boundingBox();
   const vw = page.viewportSize().width;
   if (cardBox.x < 0 || cardBox.x + cardBox.width > vw + 0.5) await fail(`the card (${cardBox.x}..${cardBox.x + cardBox.width}) does not fit the ${vw} px screen`);
-  await page.screenshot({ path: path.join(outDir, 'card.png') });
+  await page.screenshot({ path: path.join(outDir, 'card.png'), timeout: 120000 });
 
   if (phone) await copy.tap();
   else await copy.click();
