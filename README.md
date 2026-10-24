@@ -15,7 +15,8 @@
   as lines.
 
 Both RFCs are implemented through their browser phases; see
-[Status and follow-ups](#status-and-follow-ups).
+[Status and follow-ups](#status-and-follow-ups). **Try it in a browser:**
+<https://asn1-viz.play.danielstephenson.dev>.
 
 ## The bit strips
 
@@ -119,7 +120,9 @@ view's `file:line`.
 ## In a browser
 
 The same views on Strata's WebGL 2 backend (Emscripten), with the committed
-datasets built in. Nothing is compiled in the page.
+datasets built in. Nothing is compiled in the page. Every push to `main`
+deploys it to <https://asn1-viz.play.danielstephenson.dev> (arcade, through
+`browser.yml`).
 
 | | |
 |---|---|
@@ -256,7 +259,6 @@ Follow-ups, not done here:
   can paste a value.
 - **APER import**, fragmented open types (16K octets or more), BER/DER and
   OER lanes (RFC 0023 section 7).
-- **Hosting** the browser build (the CI artifact is a ready static site).
 
 ## Licence
 
