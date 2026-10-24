@@ -2,11 +2,17 @@
 //
 //   asn1-viz [FILE] [options]
 //
-// FILE is an asn1-layout/1 document (bit strips, RFC 0023); with no FILE,
+// FILE is an asn1-layout/1 document (bit strips, RFC 0023) or an
+// asn1-schema/1 document (the schema city, RFC 0024); with no FILE,
 // datasets/pkix/certificate.layout.json is opened if it is there.
 //
 // Options:
-//   --pick PATH          select a field by path (e.g. Certificate.tbsCertificate.validity)
+//   --pick PATH          strips: select a field by path (e.g. Certificate.tbsCertificate.validity)
+//                        city: select a type by name (e.g. Certificate)
+//   --schema FILE        strips: an asn1-schema/1 file, for "file:line" in the pick panel
+//                        (default: schema.json beside FILE, if there is one)
+//   --hops N             city: how far the selection's references are followed (1-4)
+//   --no-loops           city: do not draw the recursion loops
 //   --lane N             ...in lane N (default 0)
 //   --click X Y          pick what is under pixel (X, Y), as a mouse click would
 //   --links D            link every field of tree depth D across lanes (0: off)
@@ -27,6 +33,8 @@
 
 #include "model/json.h"
 #include "model/layout.h"
+#include "model/schema.h"
+#include "view/city_view.h"
 #include "view/shell.h"
 #include "view/strip_view.h"
 
@@ -48,6 +56,9 @@ struct Args {
     float yaw = NAN, pitch = NAN, zoom = 1;
     bool focus = false;
     float targetX = NAN, targetZ = NAN;
+    std::string schema;
+    int hops = 1;
+    bool loops = true;
 };
 
 [[noreturn]] void usage(int code) {
@@ -84,6 +95,9 @@ Args parse(int argc, char** argv) {
         else if (s == "--pitch") a.pitch = static_cast<float>(std::atof(next()));
         else if (s == "--zoom") a.zoom = static_cast<float>(std::atof(next()));
         else if (s == "--focus") a.focus = true;
+        else if (s == "--schema") a.schema = next();
+        else if (s == "--hops") a.hops = std::atoi(next());
+        else if (s == "--no-loops") a.loops = false;
         else if (s == "--target") {
             a.targetX = static_cast<float>(std::atof(next()));
             a.targetZ = static_cast<float>(std::atof(next()));
@@ -129,6 +143,21 @@ std::unique_ptr<Scene> makeScene(const Args& a, const json::Value& doc) {
         view->setLinkDepth(a.links);
         if (!a.pick.empty() && !view->selectPath(a.pick, static_cast<size_t>(a.lane)))
             throw std::runtime_error("no field " + a.pick + " in lane " + std::to_string(a.lane));
+        std::string schema = a.schema;
+        if (schema.empty()) {
+            const size_t slash = a.file.find_last_of("/\\");
+            const std::string beside = (slash == std::string::npos ? std::string() : a.file.substr(0, slash + 1)) + "schema.json";
+            if (std::ifstream(beside)) schema = beside;
+        }
+        if (!schema.empty()) view->setTypeLocations(loadSchemaFile(schema).locations());
+        return view;
+    }
+    if (format == "asn1-schema/1") {
+        auto view = std::make_unique<CityView>(loadSchema(doc), CityStyle{});
+        view->setHops(a.hops);
+        view->setShowRecursion(a.loops);
+        view->setCompact(a.width < 1000);
+        if (!a.pick.empty() && !view->selectName(a.pick)) throw std::runtime_error("no type " + a.pick);
         return view;
     }
     throw std::runtime_error("not a document asn1-viz draws (format \"" + format + "\")");
@@ -223,6 +252,9 @@ int main(int argc, char** argv) {
             }
             if (auto* strips = dynamic_cast<StripView*>(scene.get()); strips && strips->hasSelection())
                 std::printf("selected %s\n", strips->selectionPath().c_str());
+            if (auto* city = dynamic_cast<CityView*>(scene.get()); city && city->selected() >= 0)
+                std::printf("selected %s\n",
+                            city->city().schema().types[static_cast<size_t>(city->selected())].name.c_str());
             return 0;
         }
         while (!shell.quitRequested()) {

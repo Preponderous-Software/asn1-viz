@@ -81,6 +81,40 @@ export LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe
 ./build/asn1-viz --headless --tour frames/ --width 800 --height 450 && python3 tools/make_gif.py frames/ tour.gif
 ```
 
+## The schema city
+
+![The PKIX modules as a city, orbiting, with Certificate selected and what it pulls in within three hops](docs/media/pkix-city-orbit.gif)
+
+```sh
+./build/asn1-viz datasets/pkix/schema.json          # RFC 3280's two PKIX modules
+./build/asn1-viz datasets/recursion/schema.json     # asn1c's 92-circular-loops-OK test schema
+```
+
+An ASN.1 specification as a city ([RFC 0024](https://github.com/Preponderous-Software/rfcs)).
+Each module is a district, sized by its number of assignments and placed
+next to the modules it imports from. Each type assignment is a building,
+coloured by kind, its height the log of its member count. Values, value sets
+and objects are flat tiles. IMPORTS are arcs between districts, drawn heavier
+the more references cross them. Click a building to see its definition
+(`file:line`), what it uses (cyan arcs) and what uses it (orange). Keys
+**1**-**4** follow its references that many hops, which is how "what does
+`Certificate` pull in" becomes visible. Types in a recursive group have a
+glowing roof, and their references are drawn as red loops (**R** toggles
+them).
+
+| | |
+|---|---|
+| ![PKIX city, Certificate selected, three hops](docs/media/pkix-city.png) | ![The recursion test schema: 12 of 13 types in cycles](docs/media/recursion-city.png) |
+| PKIX: 2 modules, 126 types, 101 type-to-type references (6 across the IMPORTS arc). `Certificate` reaches 12 types within three hops. | `92-circular-loops-OK.asn1`: 13 types, 30 references, 3 recursive groups. `Everything` selected. |
+
+The model comes from asn1c's own parser and fixer, not from its printed
+output. `asn1-viz-schema` links `libasn1parser`/`libasn1fix` (built with the
+fork's `config.h`), runs `asn1f_process`, resolves every reference with
+`asn1f_lookup_symbol_ex` in the referring module's namespace (as the compiler
+does), and finds recursion with Tarjan's SCCs. It writes `asn1-schema/1`
+JSON. When a layout is opened, a `schema.json` beside it fills in the strip
+view's `file:line`.
+
 ## The extractor
 
 `asn1-viz-extract-<dataset>` decodes a value with an asn1c-generated codec,
@@ -117,6 +151,8 @@ python3 tools/layout_png.py cert.layout.json cert.png      # a flat 2D look (Pil
 |---|---|---|---|
 | `pkix` | RFC 3280 `PKIX1Explicit88` + `PKIX1Implicit88`, extracted at build time from the pinned fork's `examples/rfc3280.txt` with its `crfc2asn1.pl` | the fork's `sample-Certificate-1.der` | `datasets/pkix/certificate.layout.json` (UPER 1,031 octets, APER 1,043; both byte-identical to the fork's own `.per`/`.aper` samples) |
 | `demo` | `tests/fixtures/demo.asn1` (written for this repository) | `tests/fixtures/demo-msg.xer` | `datasets/demo/msg.layout.json` |
+| `pkix` (city) | as above | | `datasets/pkix/schema.json` |
+| `recursion` (city) | the fork's `tests/tests-asn1c-compiler/92-circular-loops-OK.asn1` | | `datasets/recursion/schema.json` |
 
 The committed layouts are what the pinned fork produces: CI regenerates them
 and fails if they differ (`cmake --build build --target update-datasets`

@@ -49,7 +49,13 @@ jobs:
           ./build/asn1-viz datasets/pkix/certificate-canonical.layout.json --headless --shot shots/pkix-canonical.png \
             --pick Certificate.tbsCertificate.serialNumber --lane 1 --links 3 | tee canon.log
           grep -q 'selected Certificate.tbsCertificate.serialNumber' canon.log
+          # The schema city, picked by name.
+          ./build/asn1-viz datasets/pkix/schema.json --headless --shot shots/pkix-city.png --pick Certificate --hops 3 | tee city.log
+          grep -q 'selected Certificate' city.log
+          ./build/asn1-viz datasets/recursion/schema.json --headless --shot shots/recursion-city.png --pick Everything | tee rec.log
+          grep -q 'selected Everything' rec.log
           test -s shots/pkix-strips.png && test -s shots/demo-click.png && test -s shots/pkix-canonical.png
+          test -s shots/pkix-city.png && test -s shots/recursion-city.png
       - uses: actions/upload-artifact@v4
         with:
           name: shots-linux
