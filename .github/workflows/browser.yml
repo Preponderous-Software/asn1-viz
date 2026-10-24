@@ -1,7 +1,7 @@
 # Builds asn1-viz for the browser (Emscripten + Strata's WebGL 2 backend),
 # runs the model tests as wasm under Node, and smoke-tests the page in
-# headless Chromium on a desktop and a phone profile. Hosting is a later
-# decision (RFC 0023, Security and Deployment): the site is an artifact.
+# headless Chromium on a desktop and a phone profile, and, when enabled,
+# deploys it to arcade as https://asn1-viz.play.danielstephenson.dev
 name: Browser build
 
 on:
@@ -86,3 +86,19 @@ jobs:
             web-site/
             smoke-out/
           if-no-files-found: ignore
+
+      - name: Write the deploy version
+        run: |
+          version=$(sed -n 's/^project(asn1_viz VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)
+          test -n "$version"
+          echo "${version}+g${GITHUB_SHA::7}" > "$RUNNER_TEMP/arcade-version.txt"
+          cat "$RUNNER_TEMP/arcade-version.txt"
+
+      - name: Deploy to arcade
+        if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && vars.ARCADE_ENABLED == 'true')
+        uses: Stephenson-Software/arcade-deploy@v1
+        with:
+          slug: asn1-viz
+          token: ${{ secrets.ARCADE_TOKEN }}
+          site-dir: web-site
+          version-file: ${{ runner.temp }}/arcade-version.txt
