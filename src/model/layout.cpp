@@ -45,14 +45,14 @@ std::string LayoutLane::bitString(int64_t start, int64_t len, size_t maxChars) c
     return s;
 }
 
-std::string LayoutLane::hexOfBits(int64_t start, int64_t len) const {
+std::string LayoutLane::hexOfBits(int64_t start, int64_t len, size_t maxChars) const {
     static const char* d = "0123456789abcdef";
     std::string s;
     if (len <= 0) return s;
     const int64_t first = start / 8, last = (start + len - 1) / 8;
     for (int64_t i = first; i <= last && i < static_cast<int64_t>(bytes.size()); ++i) {
         if (!s.empty()) s += ' ';
-        if (s.size() > 60) {
+        if (s.size() + 2 > maxChars) {
             s += "...";
             break;
         }

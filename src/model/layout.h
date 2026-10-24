@@ -47,7 +47,7 @@ struct LayoutLane {
 
     int bit(int64_t i) const;  // 0 or 1; -1 out of range
     std::string bitString(int64_t start, int64_t len, size_t maxChars = 64) const;
-    std::string hexOfBits(int64_t start, int64_t len) const;  // the octets the range touches
+    std::string hexOfBits(int64_t start, int64_t len, size_t maxChars = 64) const;  // the octets the range touches
     int segmentAt(int64_t bit) const;                         // index or -1
     int frameByPath(const std::string& path) const;           // index or -1
 };

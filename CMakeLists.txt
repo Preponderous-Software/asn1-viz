@@ -55,13 +55,14 @@ add_library(asn1viz_model STATIC
   src/model/json.cpp
   src/model/layout.cpp
   src/scene/camera.cpp
-  src/scene/mesh.cpp)
+  src/scene/mesh.cpp
+  src/scene/strip.cpp)
 target_include_directories(asn1viz_model PUBLIC src)
 asn1viz_warnings(asn1viz_model)
 
 if(ASN1VIZ_BUILD_TESTS)
   enable_testing()
-  foreach(t json mesh camera layout)
+  foreach(t json mesh camera layout strip)
     add_executable(test_${t} tests/test_${t}.cpp)
     target_link_libraries(test_${t} PRIVATE asn1viz_model)
     target_include_directories(test_${t} PRIVATE tests)
@@ -153,7 +154,7 @@ if(ASN1VIZ_WITH_STRATA OR ASN1VIZ_WEB)
     GIT_TAG ${ASN1VIZ_STRATA_REF})
   FetchContent_MakeAvailable(strata)
 
-  add_library(asn1viz_view STATIC src/view/shell.cpp)
+  add_library(asn1viz_view STATIC src/view/shell.cpp src/view/strip_view.cpp)
   target_include_directories(asn1viz_view PUBLIC src)
   target_link_libraries(asn1viz_view PUBLIC asn1viz_model strata::static)
   asn1viz_warnings(asn1viz_view)

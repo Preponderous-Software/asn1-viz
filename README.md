@@ -1,5 +1,7 @@
 # asn1-viz
 
+![The RFC 3280 sample certificate's UPER and APER encodings, one block per bit, visited field by field](docs/media/pkix-tour.gif)
+
 3D views of ASN.1 encodings and schemas, drawn on
 [Strata](https://github.com/Preponderous-Software/strata) from what
 [asn1c](https://github.com/dmccoystephenson/asn1c) actually does.
@@ -13,6 +15,45 @@
   as lines.
 
 Work in progress: built milestone by milestone as the RFCs lay out.
+
+## The bit strips
+
+```sh
+./build/asn1-viz datasets/pkix/certificate.layout.json      # or no argument: the same file
+```
+
+Every bit of each encoding is a block, wrapped into rows like a hex dump,
+with the codecs side by side (UPER left, APER right). A block's colour is its
+segment's kind: presence bits, extension bits, choice indexes, lengths,
+counts, APER's alignment padding, open-type wrapping, trailing padding. Values
+are coloured by ASN.1 type family. Its height is the nesting depth of its
+field, a 1 bit stands taller than a 0, and a dark top means the label is
+inferred rather than observed. Click a block (ray picking through
+`strata_raycast_meshes`) to see its field path, type, kind, bit range, bits
+and bytes. The same field then glows in every lane, joined by a link. Press
+**U** to widen the selection to the parent field, **N**/**P** to step
+through segments, **F** to focus, **L** to link every field of one tree
+depth across the lanes, and **H** to go home.
+
+| | |
+|---|---|
+| ![PKIX certificate: UPER and APER side by side, validity selected, depth-2 fields linked](docs/media/pkix-strips.png) | ![A clicked block: the third RDN value of the subject, 128 bits](docs/media/pkix-picked.png) |
+| The sample certificate, UPER (8,244 bits) and APER (8,344): `validity` selected in both, every depth-2 field linked across. | A click on the subject: `rdnSequence[2][0].value`, its bits and bytes. |
+
+![The demo message: period's length determinant picked by a click](docs/media/demo-strips.png)
+
+The demo message (`tests/fixtures/demo.asn1`) shows every structural
+element in 107 UPER and 128 APER bits. Here `period`'s length determinant
+is picked: 8 bits at [11, 19).
+
+Headless, for documents and CI (EGL surfaceless; software GL works):
+
+```sh
+export LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe
+./build/asn1-viz --headless --shot out.png --pick Certificate.tbsCertificate.validity --links 2
+./build/asn1-viz --headless --shot out.png --click 640 360          # what a click there picks
+./build/asn1-viz --headless --tour frames/ --width 800 --height 450 && python3 tools/make_gif.py frames/ tour.gif
+```
 
 ## The extractor
 
@@ -70,7 +111,7 @@ autotools, bison and flex to build the pinned asn1c fork.
 cmake -S . -B build            # fetches asn1c at asn1c.ref and Strata at strata.ref
 cmake --build build -j8
 ctest --test-dir build --output-on-failure
-./build/asn1-viz               # a window; drag to orbit, right-drag to pan, wheel to zoom, click to pick
+./build/asn1-viz               # a window: drag to orbit, right-drag to pan, wheel to zoom, click to pick
 ```
 
 Headless (no display; EGL surfaceless, software GL works):
