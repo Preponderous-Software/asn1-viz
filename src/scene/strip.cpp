@@ -32,7 +32,7 @@ Rgb valueColor(const std::string& type) {
 
 Rgb kindColor(const std::string& kind, const std::string& type) {
     if (kind == "value") return valueColor(type);
-    if (kind == "presence-bit") return rgb(250, 214, 64);
+    if (kind == "presence-bit" || kind == "presence-bitmap") return rgb(250, 214, 64);
     if (kind == "extension-bit") return rgb(250, 128, 40);
     if (kind == "extension-bitmap") return rgb(250, 160, 70);
     if (kind == "extension-bitmap-length") return rgb(214, 120, 54);
@@ -44,6 +44,8 @@ Rgb kindColor(const std::string& kind, const std::string& type) {
     if (kind == "open-type-length") return rgb(240, 84, 110);
     if (kind == "open-type-padding") return rgb(120, 54, 70);
     if (kind == "trailing-padding") return rgb(52, 54, 62);
+    if (kind == "open-type-unknown") return rgb(180, 70, 90);
+    if (kind == "undecoded") return rgb(150, 20, 20);
     return rgb(255, 0, 255);
 }
 

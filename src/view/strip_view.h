@@ -44,6 +44,7 @@ private:
     StripScene strips_;
     std::vector<uint32_t> meshIds_;
     uint32_t glowId_ = 0;
+    uint32_t alarmId_ = 0;  // the canonical check's rejected fields, glowing red
     bool glowDirty_ = false;
     std::vector<StrataLineVertex> byteTicks_;
     int selLane_ = -1, selSegment_ = -1, selFrame_ = -1;

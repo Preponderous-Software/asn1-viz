@@ -12,6 +12,7 @@
 //   --links D            link every field of tree depth D across lanes (0: off)
 //   --row-bits N         bits per row (default: 256, or 32 for a short encoding)
 //   --yaw D --pitch D --zoom F --focus     camera adjustments from the home view
+//   --target X Z                           ...looking at (X, 0, Z)
 //   --width W --height H
 //   --headless --shot PATH                 render one frame to a PNG and exit
 //   --headless --orbit DIR --frames N      N frames turning once around, DIR/frame-000.png ...
@@ -46,6 +47,7 @@ struct Args {
     int rowBits = 0;
     float yaw = NAN, pitch = NAN, zoom = 1;
     bool focus = false;
+    float targetX = NAN, targetZ = NAN;
 };
 
 [[noreturn]] void usage(int code) {
@@ -82,6 +84,10 @@ Args parse(int argc, char** argv) {
         else if (s == "--pitch") a.pitch = static_cast<float>(std::atof(next()));
         else if (s == "--zoom") a.zoom = static_cast<float>(std::atof(next()));
         else if (s == "--focus") a.focus = true;
+        else if (s == "--target") {
+            a.targetX = static_cast<float>(std::atof(next()));
+            a.targetZ = static_cast<float>(std::atof(next()));
+        }
         else if (s == "--version") {
             std::printf("asn1-viz %s\n", ASN1VIZ_VERSION);
             std::exit(0);
@@ -174,6 +180,7 @@ void adjustCamera(Shell& shell, const Args& a) {
     if (!std::isnan(a.pitch)) c.pitchDeg = a.pitch;
     c.distance *= a.zoom;
     if (a.focus) shell.lookAtFocus();
+    if (!std::isnan(a.targetX)) c.target = {a.targetX, 0, a.targetZ};
 }
 
 }  // namespace

@@ -122,6 +122,7 @@ Layout loadLayout(const json::Value& doc) {
         if (c.isObject()) {
             lane.canonical.result = c.str("result");
             lane.canonical.mode = c.str("mode");
+            lane.canonical.lenient = c.str("lenient");
             lane.canonical.frame = static_cast<int>(c.integer("frame", -1));
             lane.canonical.bit = c.integer("bit", -1);
             lane.canonical.rule = c.str("rule");

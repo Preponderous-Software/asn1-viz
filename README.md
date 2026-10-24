@@ -46,6 +46,32 @@ The demo message (`tests/fixtures/demo.asn1`) shows every structural
 element in 107 UPER and 128 APER bits. Here `period`'s length determinant
 is picked: 8 bits at [11, 19).
 
+### The canonical-UPER overlay
+
+asn1c has no separate canonical-UPER *encoder* (`asn_encode` sends canonical
+UPER through the basic encoder). The fork's canonical work is on the
+*decoder* side (`ctx.uper_canonical`). So the canonical view is an imported
+encoding, laid out from the decoder side, with the fork's strict canonical
+checks run over it:
+
+```sh
+./build/asn1-viz-extract-pkix --value cert.der --value-codec der --codecs uper \
+    --import received.per --canonical --out check.layout.json
+./build/asn1-viz check.layout.json
+```
+
+![The canonical overlay: the sample certificate's UPER (left) and a copy with a non-minimal serialNumber (right), rejected by the strict check in that field](docs/media/pkix-canonical.png)
+
+`datasets/pkix/certificate-canonical.layout.json` sets the fork's sample
+certificate next to a copy whose `serialNumber` has one redundant leading
+octet (made at build time by `asn1-viz-widen-integer`). The strict decoder
+rejects the copy in `serialNumber`, at bit 164: X.691 11.3.6 requires an
+unconstrained INTEGER's contents in the fewest octets. That field is capped
+in red, and a post marks where the check fired. The lenient mode accepts the
+copy, and the depth-3 links show every later field shifted by 8 bits. The
+fork's own sample, imported, passes (`canonical UPER: ok`), and its
+decoder-side frames match the encoder side bit for bit.
+
 Headless, for documents and CI (EGL surfaceless; software GL works):
 
 ```sh
