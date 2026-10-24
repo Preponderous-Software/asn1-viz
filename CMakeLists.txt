@@ -251,9 +251,11 @@ if(ASN1VIZ_WEB)
   file(GLOB_RECURSE ASN1VIZ_WEB_DATA CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/datasets/*.json")
   target_link_options(asn1-viz-web PRIVATE
     -sSTACK_SIZE=1MB
-    "-sEXPORTED_FUNCTIONS=_main,_asn1viz_open,_asn1viz_resize,_asn1viz_key,_asn1viz_zoom,_asn1viz_click,_asn1viz_status"
+    "-sEXPORTED_FUNCTIONS=_main,_asn1viz_open,_asn1viz_resize,_asn1viz_key,_asn1viz_zoom,_asn1viz_click,_asn1viz_status,_asn1viz_bench_view"
     -sEXPORTED_RUNTIME_METHODS=ccall,cwrap,UTF8ToString
     "--embed-file=${CMAKE_CURRENT_SOURCE_DIR}/datasets@/datasets"
     "--shell-file=${CMAKE_CURRENT_SOURCE_DIR}/web/shell.html")
   set_property(TARGET asn1-viz-web APPEND PROPERTY LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/web/shell.html" ${ASN1VIZ_WEB_DATA})
+  # The page's ?bench mode (web/bench.js) is served next to it.
+  configure_file(web/bench.js "${CMAKE_CURRENT_BINARY_DIR}/bench.js" COPYONLY)
 endif()

@@ -135,7 +135,7 @@ source /path/to/emsdk/emsdk_env.sh
 emcmake cmake -S . -B build-web -DCMAKE_BUILD_TYPE=Release -DASN1VIZ_WITH_STRATA=OFF -DASN1VIZ_WEB=ON
 cmake --build build-web -j8
 ctest --test-dir build-web                      # the model tests, as wasm under Node
-# serve build-web/asn1-viz.html (+ .js, .wasm) as index.html; ?set=0..4 picks the dataset
+# serve build-web/asn1-viz.html (+ .js, .wasm, bench.js) as index.html; ?set=0..4 picks the dataset
 ```
 
 Five datasets sit behind the buttons: the certificate's bits, the canonical
@@ -149,6 +149,16 @@ phone at device pixel ratio 2. Every dataset must open and draw, a real click
 or tap must change the selection, and a click or tap on a block must pick the
 same block as the page's own pick call at that point (device pixel ratios 1, 2
 and 3).
+
+To measure the frame rate on a real device, open the page with `?bench`
+(<https://asn1-viz.play.danielstephenson.dev/?bench>). It flies one fixed
+orbit of the PKIX city for 15 seconds after a 1-second warm-up, then shows the
+frame rate, the frame time (median and p95), the page's own work per frame,
+the GPU time where the browser offers WebGL 2 timer queries, the canvas size
+and device pixel ratio and the GPU's name, with a button that copies it all as
+text. `?bench=30` runs for 30 seconds. Nothing is sent anywhere. CI checks that
+a run finishes and shows its card on a desktop and a phone profile; it keeps no
+numbers, as headless Chromium draws on the CPU.
 
 ## The extractor
 
