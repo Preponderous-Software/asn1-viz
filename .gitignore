@@ -1,0 +1,6 @@
+build/
+build-*/
+node_modules/
+__pycache__/
+*.png.tmp
+/out/
