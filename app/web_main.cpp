@@ -44,22 +44,26 @@ struct App {
     std::unique_ptr<Shell> shell;
     int dataset = -1;
     bool compact = false;
-    double cssW = 0, cssH = 0;  // the canvas in CSS pixels (pointer coordinates)
+    double cssW = 0, cssH = 0;  // the canvas in CSS pixels (the page's coordinates)
+    double winW = 0, winH = 0;  // SDL's window size (its pointer coordinates)
     std::string status;
 };
 
 App* app = nullptr;
 
-// Pointer coordinates are CSS pixels; the drawable may be denser. Text on
-// the canvas is scaled the same way, and on a narrow page the pick panel is
-// the page's (a sheet under the canvas), not the canvas's.
+// SDL's pointer events are in its window's units: the size the page asked
+// for, which is less than the CSS size when the page caps a high device pixel
+// ratio (a DPR-3 phone); the drawable is that times the device pixel ratio.
+// Text on the canvas is scaled by drawable pixels per CSS pixel, and on a
+// narrow page the pick panel is the page's (a sheet under the canvas), not
+// the canvas's.
 void fitPointer() {
-    if (!app->shell || app->cssW < 1 || app->cssH < 1) return;
+    if (!app->shell || app->cssW < 1 || app->cssH < 1 || app->winW < 1 || app->winH < 1) return;
     int32_t dw = 0, dh = 0;
     app->engine->drawableSize(dw, dh);
-    const float sx = static_cast<float>(dw / app->cssW), sy = static_cast<float>(dh / app->cssH);
-    app->shell->setPointerScale(sx, sy);
-    app->shell->setUiScale(app->compact ? sx * 0.75f : sx);  // a phone: room for a few more words
+    app->shell->setPointerScale(static_cast<float>(dw / app->winW), static_cast<float>(dh / app->winH));
+    const float ui = static_cast<float>(dw / app->cssW);
+    app->shell->setUiScale(app->compact ? ui * 0.75f : ui);  // a phone: room for a few more words
     if (app->scene) app->scene->setPanelOnCanvas(!app->compact);
 }
 
@@ -129,6 +133,8 @@ EMSCRIPTEN_KEEPALIVE void asn1viz_resize(double w, double h, double cssW, double
     app->compact = compact != 0;
     app->cssW = cssW;
     app->cssH = cssH;
+    app->winW = w;
+    app->winH = h;
     try {
         if (app->shell) app->shell->resize(static_cast<int32_t>(w), static_cast<int32_t>(h));
         else app->engine->resize(static_cast<int32_t>(w), static_cast<int32_t>(h));
@@ -215,6 +221,8 @@ int main() {
     app->compact = cw < 1000;
     app->cssW = cw;
     app->cssH = ch;
+    app->winW = cw;  // the window was created at the CSS size
+    app->winH = ch;
     asn1viz_open(0);
     emscripten_run_script("if (Module.onViewerReady) Module.onViewerReady()");
     emscripten_set_main_loop_arg(frame, nullptr, 0, false);

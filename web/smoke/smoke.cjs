@@ -1,11 +1,15 @@
 // Smoke test for the browser build in headless Chromium (Playwright).
 //
-//   node web/smoke/smoke.cjs <url> <out-dir> [--phone]
+//   node web/smoke/smoke.cjs <url> <out-dir> [--phone [--dpr <n>]]
 //
 // Checks: the page starts with no page errors; every dataset opens from its
 // button and draws (the canvas is not one flat colour) with its default
 // selection; a real click (or tap) on the canvas goes through SDL and
-// strata_raycast_meshes and changes the selection. Writes a PNG per dataset.
+// strata_raycast_meshes and changes the selection; and a click (or tap) on a
+// block picks the same block as the page's own pick call at that point (CSS
+// pixels, no SDL), so SDL's pointer units are scaled right at the profile's
+// device pixel ratio (1 on the desktop, 3 on the iPhone 13; --dpr overrides
+// the phone's). Writes a PNG per dataset.
 'use strict';
 const fs = require('fs');
 const path = require('path');
@@ -14,8 +18,10 @@ const { chromium, devices } = require('playwright');
 
 const [url, outDir] = process.argv.slice(2);
 const phone = process.argv.includes('--phone');
-if (!url || !outDir) {
-  console.error('usage: smoke.cjs <url> <out-dir> [--phone]');
+const dprArg = process.argv.indexOf('--dpr');
+const dpr = dprArg > 0 ? Number(process.argv[dprArg + 1]) : 0;
+if (!url || !outDir || (dprArg > 0 && !(dpr > 0))) {
+  console.error('usage: smoke.cjs <url> <out-dir> [--phone [--dpr <n>]]');
   process.exit(2);
 }
 fs.mkdirSync(outDir, { recursive: true });
@@ -80,7 +86,7 @@ const expected = [
 
 (async () => {
   const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
-  const base = phone ? devices['iPhone 13'] : { viewport: { width: 1280, height: 800 } };
+  const base = phone ? { ...devices['iPhone 13'], ...(dpr ? { deviceScaleFactor: dpr } : {}) } : { viewport: { width: 1280, height: 800 } };
   const context = await browser.newContext({ ...base, userAgent: (base.userAgent || 'Mozilla/5.0') + ' asn1viz-smoke headless' });
   const page = await context.newPage();
   const errors = [];
@@ -136,6 +142,51 @@ const expected = [
   }
   console.log(`click: ${before || '(nothing)'} -> ${after || '(nothing)'}`);
   if (after === before) await fail('clicking the canvas never changed the selection');
+
+  // A click or tap picks the block the page's own pick call finds at that
+  // point. SDL reports the pointer in its window's units, which on a phone
+  // with a capped device pixel ratio (3, capped at 2) are not CSS pixels: a
+  // wrong scale picks a block up and to the left, or nothing. Re-opening the
+  // demo before each probe selects Msg.period with the camera homed, so every
+  // probe sees the same layout (on a phone, clearing the selection hides the
+  // sheet and re-frames the view). Only points well inside a block are used:
+  // the direct pick must agree 2 CSS pixels either way, so touch rounding at a
+  // block's edge cannot fail the check.
+  const devicePixelRatio = await page.evaluate(() => window.devicePixelRatio);
+  const reopen = async () => {
+    await page.evaluate(() => window.asn1viz.open(2));
+    await page.waitForTimeout(400);
+    return canvas.boundingBox();
+  };
+  const pickDirect = (x, y) => page.evaluate(([px, py]) => {
+    window.asn1viz.click(px, py);
+    return JSON.parse(window.asn1viz.status()).selected;
+  }, [x, y]);
+  let probed = 0;
+  for (const fy of [0.47, 0.5, 0.53]) {
+    for (let fx = 0.1; fx < 0.92 && probed < 3; fx += 0.08) {
+      let b = await reopen();
+      const cx = Math.round(b.width * fx), cy = Math.round(b.height * fy);
+      const want = await pickDirect(cx, cy);
+      if (!want || want === 'Msg.period') continue;
+      let solid = true;
+      for (const [dx, dy] of [[-2, 0], [2, 0], [0, -2], [0, 2]]) {
+        if ((await pickDirect(cx + dx, cy + dy)) !== want) { solid = false; break; }
+      }
+      if (!solid) continue;
+      b = await reopen();
+      const x = b.x + cx, y = b.y + cy;
+      if (phone) await page.touchscreen.tap(x, y);
+      else await page.mouse.click(x, y);
+      await page.waitForTimeout(800);
+      const got = (await status()).selected;
+      console.log(`pointer at DPR ${devicePixelRatio}: (${cx}, ${cy}) direct ${want}, ${phone ? 'tap' : 'click'} ${got || '(nothing)'}`);
+      if (got !== want)
+        await fail(`a ${phone ? 'tap' : 'click'} at (${cx}, ${cy}) picked ${got || 'nothing'}, but that point is ${want} (DPR ${devicePixelRatio})`);
+      probed++;
+    }
+  }
+  if (probed < 2) await fail(`only ${probed} points well inside a block were found on the demo to check the pointer with`);
 
   if (errors.length) await fail('page errors: ' + errors.join(' | '));
   await page.screenshot({ path: path.join(outDir, 'page.png') });
