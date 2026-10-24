@@ -152,6 +152,17 @@ EMSCRIPTEN_KEEPALIVE void asn1viz_key(int scancode) {
     e.scancode = scancode;
     app->shell->handle(e);
 }
+// The page's ?bench mode flies the camera along a fixed path: Home, then
+// turned yawDeg about the target, at pitchDeg above the horizon, with the
+// distance scaled. Absolute, so the path is the same whatever the frame rate.
+EMSCRIPTEN_KEEPALIVE void asn1viz_bench_view(double yawDeg, double pitchDeg, double distanceScale) {
+    if (!app || !app->shell || distanceScale <= 0) return;
+    app->shell->home();
+    OrbitCamera& c = app->shell->camera();
+    c.yawDeg += static_cast<float>(yawDeg);
+    c.pitchDeg = static_cast<float>(pitchDeg);
+    c.distance *= static_cast<float>(distanceScale);
+}
 EMSCRIPTEN_KEEPALIVE void asn1viz_zoom(double factor) {
     if (app && app->shell && factor > 0) app->shell->camera().distance *= static_cast<float>(factor);
 }

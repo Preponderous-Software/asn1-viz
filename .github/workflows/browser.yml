@@ -56,7 +56,7 @@ jobs:
         run: |
           mkdir -p web-site
           cp build-web/asn1-viz.html web-site/index.html
-          cp build-web/asn1-viz.js build-web/asn1-viz.wasm web-site/
+          cp build-web/asn1-viz.js build-web/asn1-viz.wasm build-web/bench.js web-site/
           ls -l web-site
           echo "site: $(du -sh web-site | cut -f1)"
 
@@ -77,6 +77,11 @@ jobs:
           node web/smoke/smoke.cjs http://127.0.0.1:8080/ smoke-out/desktop
           node web/smoke/smoke.cjs http://127.0.0.1:8080/ smoke-out/phone --phone
           node web/smoke/smoke.cjs http://127.0.0.1:8080/ smoke-out/phone-dpr2 --phone --dpr 2
+
+      - name: Bench mode completes and shows its card (desktop, iPhone 13 profile)
+        run: |
+          node web/smoke/bench.cjs "http://127.0.0.1:8080/?bench=3" smoke-out/bench-desktop
+          node web/smoke/bench.cjs "http://127.0.0.1:8080/?bench=3" smoke-out/bench-phone --phone
 
       - name: Upload the site and the smoke screenshots
         if: always()
