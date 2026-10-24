@@ -1,0 +1,16 @@
+-- A small module that exercises every structural element PER writes:
+-- an extensible SEQUENCE (extension bit, presence bit, extension bitmap),
+-- an extensible constrained INTEGER, a size-constrained string, a
+-- SEQUENCE OF with a constrained count, an extensible CHOICE, and one
+-- extension addition (an open type). Written for asn1-viz's tests.
+Demo DEFINITIONS AUTOMATIC TAGS ::= BEGIN
+Msg ::= SEQUENCE {
+  id        INTEGER (0..255),
+  period    INTEGER (1..181, ...),
+  name      IA5String (SIZE(1..16)) OPTIONAL,
+  items     SEQUENCE (SIZE(0..8)) OF Item,
+  ...,
+  extra     BOOLEAN OPTIONAL
+}
+Item ::= CHOICE { a INTEGER (0..7), b OCTET STRING (SIZE(0..4)), ... }
+END

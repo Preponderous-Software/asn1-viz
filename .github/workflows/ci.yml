@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    name: Linux (asn1c fork, extractor, viewer, headless)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      LIBGL_ALWAYS_SOFTWARE: "1"
+      GALLIUM_DRIVER: llvmpipe
+      __EGL_VENDOR_LIBRARY_FILENAMES: /usr/share/glvnd/egl_vendor.d/50_mesa.json
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install autotools, bison, flex, SDL3 build dependencies and Mesa
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            autoconf automake libtool bison flex \
+            libx11-dev libxext-dev libxcursor-dev libxi-dev libxfixes-dev libxrandr-dev libxss-dev \
+            libegl-dev libgl-dev libegl1 libegl-mesa0 libgl1-mesa-dri
+      - name: Configure (fetches and builds the pinned asn1c fork and Strata)
+        run: cmake -S . -B build -DASN1VIZ_WARNINGS_AS_ERRORS=ON -Wno-dev
+      - name: Build
+        run: cmake --build build -j4
+      - name: Tests
+        run: ctest --test-dir build --output-on-failure
+      - name: Headless render
+        run: |
+          mkdir -p shots
+          ./build/asn1-viz --headless --shot shots/test-pattern.png
+          test -s shots/test-pattern.png
+      - uses: actions/upload-artifact@v4
+        with:
+          name: shots-linux
+          path: shots/
+
+  windows:
+    name: Windows (MSVC, viewer and tests)
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S . -B build -A x64 -DASN1VIZ_WARNINGS_AS_ERRORS=ON -Wno-dev
+      - name: Build
+        run: cmake --build build --config Release --parallel
+      - name: Tests
+        run: ctest --test-dir build -C Release --output-on-failure
