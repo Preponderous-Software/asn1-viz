@@ -1,0 +1,3 @@
+datasets/**/*.json text eol=lf
+*.png binary
+*.gif binary

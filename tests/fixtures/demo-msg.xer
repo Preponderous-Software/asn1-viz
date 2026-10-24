@@ -1,0 +1,10 @@
+<Msg>
+    <id>42</id>
+    <period>200</period>
+    <name>hi</name>
+    <items>
+        <a>5</a>
+        <b>01 02</b>
+    </items>
+    <extra><true/></extra>
+</Msg>
