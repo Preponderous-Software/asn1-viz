@@ -33,7 +33,7 @@ void Overlay::text(float x, float y, float pixelSize, const std::string& s, cons
     StrataText t{};
     t.x = std::round(x);
     t.y = std::round(y);
-    t.pixel_size = pixelSize;
+    t.pixel_size = pixelSize * ui;
     t.flags = shadow ? STRATA_TEXT_SHADOW : 0u;
     std::copy(rgba, rgba + 4, t.color);
     t.utf8 = strings.back().c_str();
@@ -86,9 +86,8 @@ void Shell::home() {
 
 void Shell::resize(int32_t width, int32_t height) {
     if (width < 1 || height < 1) return;
-    width_ = width;
-    height_ = height;
     engine_.resize(width, height);
+    engine_.drawableSize(width_, height_);
 }
 
 void Shell::lookAtFocus() {
@@ -107,7 +106,11 @@ void Shell::pickAt(float px, float py) {
 void Shell::handle(const StrataEvent& e) {
     switch (e.type) {
         case STRATA_EVENT_QUIT: quit_ = true; break;
-        case STRATA_EVENT_RESIZED: resize(e.width, e.height); break;
+        case STRATA_EVENT_RESIZED:
+            // The window changed (or was changed by resize()): follow it, without
+            // resizing again (a high-density canvas reports more pixels than asked).
+            engine_.drawableSize(width_, height_);
+            break;
         case STRATA_EVENT_MOUSE_BUTTON_DOWN:
             dragButton_ = e.button;
             dragDistance_ = 0;
@@ -115,7 +118,7 @@ void Shell::handle(const StrataEvent& e) {
             lastY_ = e.y;
             break;
         case STRATA_EVENT_MOUSE_BUTTON_UP:
-            if (e.button == 1 && dragDistance_ < 4) pickAt(e.x, e.y);  // a click, not a drag
+            if (e.button == 1 && dragDistance_ < 4) pickAt(e.x * pointerX_, e.y * pointerY_);  // a click, not a drag
             dragButton_ = 0;
             break;
         case STRATA_EVENT_MOUSE_MOTION: {
@@ -163,6 +166,7 @@ void Shell::frame() {
 
     scene_.sync(engine_);
     overlay_.clear();
+    overlay_.ui = ui_;
     scene_.draw(overlay_, m, width_, height_);
 
     StrataFrameDesc fd{};

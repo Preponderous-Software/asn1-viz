@@ -227,7 +227,7 @@ if(ASN1VIZ_WITH_STRATA OR ASN1VIZ_WEB)
     GIT_TAG ${ASN1VIZ_STRATA_REF})
   FetchContent_MakeAvailable(strata)
 
-  add_library(asn1viz_view STATIC src/view/shell.cpp src/view/strip_view.cpp src/view/city_view.cpp)
+  add_library(asn1viz_view STATIC src/view/shell.cpp src/view/strip_view.cpp src/view/city_view.cpp src/view/open.cpp)
   target_include_directories(asn1viz_view PUBLIC src)
   target_link_libraries(asn1viz_view PUBLIC asn1viz_model strata::static)
   asn1viz_warnings(asn1viz_view)
@@ -238,4 +238,22 @@ if(ASN1VIZ_WITH_STRATA)
   target_link_libraries(asn1-viz PRIVATE asn1viz_view)
   target_compile_definitions(asn1-viz PRIVATE ASN1VIZ_VERSION="${PROJECT_VERSION}")
   asn1viz_warnings(asn1-viz)
+endif()
+
+# emcmake cmake -S . -B build-web -DASN1VIZ_WITH_STRATA=OFF -DASN1VIZ_WEB=ON: the
+# page is asn1-viz.html + .js + .wasm, with the committed datasets built in
+# (nothing is compiled in the page).
+if(ASN1VIZ_WEB)
+  add_executable(asn1-viz-web app/web_main.cpp)
+  target_link_libraries(asn1-viz-web PRIVATE asn1viz_view)
+  asn1viz_warnings(asn1-viz-web)
+  set_target_properties(asn1-viz-web PROPERTIES OUTPUT_NAME asn1-viz SUFFIX ".html")
+  file(GLOB_RECURSE ASN1VIZ_WEB_DATA CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/datasets/*.json")
+  target_link_options(asn1-viz-web PRIVATE
+    -sSTACK_SIZE=1MB
+    "-sEXPORTED_FUNCTIONS=_main,_asn1viz_open,_asn1viz_resize,_asn1viz_key,_asn1viz_zoom,_asn1viz_click,_asn1viz_status"
+    -sEXPORTED_RUNTIME_METHODS=ccall,cwrap,UTF8ToString
+    "--embed-file=${CMAKE_CURRENT_SOURCE_DIR}/datasets@/datasets"
+    "--shell-file=${CMAKE_CURRENT_SOURCE_DIR}/web/shell.html")
+  set_property(TARGET asn1-viz-web APPEND PROPERTY LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/web/shell.html" ${ASN1VIZ_WEB_DATA})
 endif()

@@ -1,0 +1,88 @@
+# Builds asn1-viz for the browser (Emscripten + Strata's WebGL 2 backend),
+# runs the model tests as wasm under Node, and smoke-tests the page in
+# headless Chromium on a desktop and a phone profile. Hosting is a later
+# decision (RFC 0023, Security and Deployment): the site is an artifact.
+name: Browser build
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: browser-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  browser:
+    name: Web build and smoke test (headless Chromium)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check out the pinned Strata
+        run: |
+          ref="$(tr -d '[:space:]' < strata.ref)"
+          test -n "$ref"
+          git init -q "$RUNNER_TEMP/strata"
+          git -C "$RUNNER_TEMP/strata" fetch -q --depth 1 https://github.com/Preponderous-Software/strata.git "$ref"
+          git -C "$RUNNER_TEMP/strata" checkout -q FETCH_HEAD
+          echo "STRATA_DIR=$RUNNER_TEMP/strata" >> "$GITHUB_ENV"
+
+      - name: Set up emsdk 6.0.11 (Strata's pin)
+        run: |
+          git clone -q --depth 1 https://github.com/emscripten-core/emsdk.git "$RUNNER_TEMP/emsdk"
+          "$RUNNER_TEMP/emsdk/emsdk" install 6.0.11
+          "$RUNNER_TEMP/emsdk/emsdk" activate 6.0.11
+
+      - name: Configure and build
+        run: |
+          source "$RUNNER_TEMP/emsdk/emsdk_env.sh"
+          emcmake cmake -S . -B build-web -DCMAKE_BUILD_TYPE=Release -DASN1VIZ_WITH_STRATA=OFF -DASN1VIZ_WEB=ON \
+            -DASN1VIZ_WARNINGS_AS_ERRORS=ON -DFETCHCONTENT_SOURCE_DIR_STRATA="$STRATA_DIR" -Wno-dev
+          cmake --build build-web -j "$(nproc)"
+
+      - name: Tests as wasm (Node)
+        run: |
+          source "$RUNNER_TEMP/emsdk/emsdk_env.sh"
+          ctest --test-dir build-web --output-on-failure
+
+      - name: Assemble the site
+        run: |
+          mkdir -p web-site
+          cp build-web/asn1-viz.html web-site/index.html
+          cp build-web/asn1-viz.js build-web/asn1-viz.wasm web-site/
+          ls -l web-site
+          echo "site: $(du -sh web-site | cut -f1)"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Playwright and Chromium
+        working-directory: web/smoke
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      - name: Smoke test (desktop, then iPhone 13 profile)
+        run: |
+          python3 -m http.server 8080 --bind 127.0.0.1 --directory web-site > http.log 2>&1 &
+          sleep 1
+          node web/smoke/smoke.cjs http://127.0.0.1:8080/ smoke-out/desktop
+          node web/smoke/smoke.cjs http://127.0.0.1:8080/ smoke-out/phone --phone
+
+      - name: Upload the site and the smoke screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: web
+          path: |
+            web-site/
+            smoke-out/
+          if-no-files-found: ignore

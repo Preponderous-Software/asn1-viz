@@ -23,10 +23,18 @@ struct Overlay {
     std::vector<StrataLineVertex> lines;
     std::vector<StrataText> texts;
     std::deque<std::string> strings;  // owns the text the StrataText entries point to
+    float ui = 1;                     // text and screen-space spacing scale (a dense canvas draws bigger)
 
     void line(Vec3 a, Vec3 b, const float rgba[4]);
     void text(float x, float y, float pixelSize, const std::string& s, const float rgba[4], bool shadow = true);
     void clear();
+};
+
+// One line of a view's pick panel (drawn on the canvas, or by a page).
+struct PanelLine {
+    std::string text;
+    float color[4];
+    float size;  // 16 or 8 (font pixels, before the ui scale)
 };
 
 // Uploads a MeshBuilder to the engine and returns the mesh id (0 if empty).
@@ -53,12 +61,23 @@ public:
         (void)scancode;
         return false;
     }
+    // The pick panel's lines; `fit` is the most characters a line may hold.
+    virtual std::vector<PanelLine> panel(size_t fit) const {
+        (void)fit;
+        return {};
+    }
+    // Draws the panel on the canvas (false: a page shows it instead).
+    void setPanelOnCanvas(bool on) { panelOnCanvas_ = on; }
+    bool panelOnCanvas() const { return panelOnCanvas_; }
     // Where the camera should look when something was just picked; false
     // to leave it.
     virtual bool focus(Vec3& target) const {
         (void)target;
         return false;
     }
+
+private:
+    bool panelOnCanvas_ = true;
 };
 
 class Shell {
@@ -72,6 +91,14 @@ public:
     bool quitRequested() const { return quit_; }
 
     void resize(int32_t width, int32_t height);
+    // Pointer events arrive in window units; the drawable can be larger (a
+    // high-density browser canvas). Drawable pixels per window unit.
+    void setPointerScale(float sx, float sy) {
+        pointerX_ = sx;
+        pointerY_ = sy;
+    }
+    // Scales on-canvas text and its spacing (for a dense canvas).
+    void setUiScale(float ui) { ui_ = ui > 0 ? ui : 1; }
     // Picks what is under a pixel, as a click there would.
     void pickAt(float px, float py);
     void home();
@@ -85,6 +112,8 @@ private:
     OrbitCamera camera_;
     Overlay overlay_;
     int32_t width_ = 0, height_ = 0;
+    float pointerX_ = 1, pointerY_ = 1;
+    float ui_ = 1;
     bool quit_ = false;
     int dragButton_ = 0;
     float dragDistance_ = 0;

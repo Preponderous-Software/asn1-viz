@@ -9,7 +9,7 @@ namespace asn1viz {
 namespace {
 
 // SDL3 scancodes.
-constexpr int32_t kScan1 = 30, kScan2 = 31, kScan3 = 32, kScan4 = 33, kScanR = 21, kScanF = 9, kScanU = 24;
+constexpr int32_t kScan1 = 30, kScan4 = 33, kScanR = 21, kScanF = 9, kScanU = 24;
 
 const float kInk[4] = {0.92f, 0.94f, 0.97f, 1};
 const float kDim[4] = {0.62f, 0.66f, 0.74f, 1};
@@ -139,7 +139,7 @@ void CityView::draw(Overlay& o, const CameraMatrices& cam, int w, int h) {
     const Schema& s = city_.schema();
     const float lift = city_.tallest() + 2;
     std::vector<Rect> taken;
-    taken.push_back({0, 0, static_cast<float>(w) * 0.6f, 16 + 7 * 20.0f});  // the panel
+    if (panelOnCanvas()) taken.push_back({0, 0, static_cast<float>(w) * 0.6f, (16 + 7 * 20.0f) * o.ui});  // the panel
 
     // IMPORTS arcs between districts, one per (importer, source) pair, drawn
     // heavier the more references cross it.
@@ -203,8 +203,8 @@ void CityView::draw(Overlay& o, const CameraMatrices& cam, int w, int h) {
         if (!toScreen(cam, {(di.x0 + di.x1) / 2, 0, di.z1 + 1.5f}, w, h, x, y)) continue;
         const std::string& name = s.modules[static_cast<size_t>(di.module)].name;
         const std::string t = name + "  (" + std::to_string(di.types.size()) + ")";
-        const float tw = 16.0f * static_cast<float>(t.size());
-        const Rect r{x - tw / 2, y, x + tw / 2, y + 16};
+        const float tw = 16.0f * o.ui * static_cast<float>(t.size());
+        const Rect r{x - tw / 2, y, x + tw / 2, y + 16 * o.ui};
         if (overlaps(taken, r)) continue;
         o.text(r.x0, r.y0, 16, t, kInk);
         taken.push_back(r);
@@ -237,8 +237,8 @@ void CityView::draw(Overlay& o, const CameraMatrices& cam, int w, int h) {
         const bool sel = t == selected_;
         const float size = sel ? 16.0f : 8.0f;
         const std::string& name = s.types[static_cast<size_t>(t)].name;
-        const float tw = size * static_cast<float>(name.size());
-        const Rect r{x - tw / 2, y - size - 2, x + tw / 2, y - 2};
+        const float tw = size * o.ui * static_cast<float>(name.size());
+        const Rect r{x - tw / 2, y - size * o.ui - 2, x + tw / 2, y - 2};
         if (!sel && (overlaps(taken, r) || r.x0 < 0 || r.x1 > static_cast<float>(w))) continue;
         o.text(r.x0, r.y0, size, name, sel ? kIn : kInk);
         taken.push_back(r);
@@ -246,21 +246,54 @@ void CityView::draw(Overlay& o, const CameraMatrices& cam, int w, int h) {
     }
 
     // The panel.
-    float py = 16;
+    const float ui = o.ui;
+    if (panelOnCanvas()) {
+        float py = 16 * ui;
+        const size_t fit = static_cast<size_t>(std::max(8.0f, (static_cast<float>(w) - 32 * ui) / (8 * ui)));
+        for (const PanelLine& l : panel(fit)) {
+            o.text(16 * ui, py, l.size, l.text, l.color);
+            py += (l.size + 4) * ui;
+        }
+    }
+
+    if (compact_) return;
+    float ly = static_cast<float>(h) - (16 + 12.0f * static_cast<float>(cityLegend().size() + 3)) * ui;
+    for (const auto& k : cityLegend()) {
+        const Rgb c = typeKindColor(k.second);
+        const float rgba[4] = {c.r, c.g, c.b, 1};
+        o.text(16 * ui, ly, 8, "##", rgba, false);
+        o.text(36 * ui, ly, 8, k.first, kDim);
+        ly += 12 * ui;
+    }
+    o.text(16 * ui, ly, 8, "##", kLoop, false);
+    o.text(36 * ui, ly, 8, "recursive (glowing roof, red loops)", kDim);
+    ly += 12 * ui;
+    o.text(16 * ui, ly, 8, "height: log of member count   arcs: IMPORTS; cyan uses, orange used by", kDim);
+    ly += 12 * ui;
+    o.text(16 * ui, ly, 8, "drag orbit  right-drag pan  wheel zoom  click pick  1-4 hops  U user  R loops  F focus  H home",
+           kDim);
+}
+
+std::vector<PanelLine> CityView::panel(size_t fit) const {
+    std::vector<PanelLine> out;
     auto line = [&](const std::string& t, const float* c, float size = 16) {
-        o.text(16, py, size, t, c);
-        py += size + 4;
+        PanelLine l;
+        l.text = size == 8 && fit > 3 && t.size() > fit ? t.substr(0, fit - 3) + "..." : t;
+        std::copy(c, c + 4, l.color);
+        l.size = size;
+        out.push_back(std::move(l));
     };
+    const Schema& s = city_.schema();
     if (selected_ >= 0) {
         const SchemaType& t = s.types[static_cast<size_t>(selected_)];
         const SchemaModule& m = s.modules[static_cast<size_t>(t.module)];
         line(t.name + " ::= " + t.kind, kInk);
         line(m.name + "   " + m.file + ":" + std::to_string(t.line) + "   " + std::to_string(t.members) + " members",
              kDim);
-        const auto& out = s.out[static_cast<size_t>(selected_)];
-        const auto& in = s.in[static_cast<size_t>(selected_)];
-        line("uses (" + std::to_string(out.size()) + "): " + joinNames(s, out, true, 6), kOut, 8);
-        line("used by (" + std::to_string(in.size()) + "): " + joinNames(s, in, false, 6), kIn, 8);
+        const auto& outRefs = s.out[static_cast<size_t>(selected_)];
+        const auto& inRefs = s.in[static_cast<size_t>(selected_)];
+        line("uses (" + std::to_string(outRefs.size()) + "): " + joinNames(s, outRefs, true, 6), kOut, 8);
+        line("used by (" + std::to_string(inRefs.size()) + "): " + joinNames(s, inRefs, false, 6), kIn, 8);
         const size_t reach = s.reach(selected_, hops_).size() - 1;
         line("within " + std::to_string(hops_) + (hops_ == 1 ? " hop: " : " hops: ") + std::to_string(reach) +
                  " types (keys 1-4)",
@@ -277,23 +310,7 @@ void CityView::draw(Overlay& o, const CameraMatrices& cam, int w, int h) {
              kInk);
         line("click a building to see its definition and what it uses", kDim);
     }
-
-    if (compact_) return;
-    float ly = static_cast<float>(h) - 16 - 12.0f * static_cast<float>(cityLegend().size() + 3);
-    for (const auto& k : cityLegend()) {
-        const Rgb c = typeKindColor(k.second);
-        const float rgba[4] = {c.r, c.g, c.b, 1};
-        o.text(16, ly, 8, "##", rgba, false);
-        o.text(36, ly, 8, k.first, kDim);
-        ly += 12;
-    }
-    o.text(16, ly, 8, "##", kLoop, false);
-    o.text(36, ly, 8, "recursive (glowing roof, red loops)", kDim);
-    ly += 12;
-    o.text(16, ly, 8, "height: log of member count   arcs: IMPORTS; cyan uses, orange used by", kDim);
-    ly += 12;
-    o.text(16, ly, 8, "drag orbit  right-drag pan  wheel zoom  click pick  1-4 hops  U user  R loops  F focus  H home",
-           kDim);
+    return out;
 }
 
 }  // namespace asn1viz
