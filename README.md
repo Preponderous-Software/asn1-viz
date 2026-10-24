@@ -6,15 +6,16 @@
 [Strata](https://github.com/Preponderous-Software/strata) from what
 [asn1c](https://github.com/dmccoystephenson/asn1c) actually does.
 
-- **Bit-layout visualizer** ([Preponderous RFC 0023](https://github.com/Preponderous-Software/rfcs)):
+- **Bit-layout visualizer** ([Preponderous RFC 0023](https://github.com/Preponderous-Software/rfcs/blob/main/rfcs/rfc_0023_asn1c_bit_layout_visualizer.md)):
   the UPER and APER encodings of one value as side-by-side 3D strips, every
   segment (value, preamble bit, length determinant, alignment padding, ...)
   a block you can pick to see its field path and its bits.
-- **Schema city** (RFC 0024): an ASN.1 specification as a city, one district
+- **Schema city** ([RFC 0024](https://github.com/Preponderous-Software/rfcs/blob/main/rfcs/rfc_0024_asn1c_schema_city.md)): an ASN.1 specification as a city, one district
   per module and one building per type, with references and recursion drawn
   as lines.
 
-Work in progress: built milestone by milestone as the RFCs lay out.
+Both RFCs are implemented through their browser phases; see
+[Status and follow-ups](#status-and-follow-ups).
 
 ## The bit strips
 
@@ -90,7 +91,7 @@ export LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe
 ./build/asn1-viz datasets/recursion/schema.json     # asn1c's 92-circular-loops-OK test schema
 ```
 
-An ASN.1 specification as a city ([RFC 0024](https://github.com/Preponderous-Software/rfcs)).
+An ASN.1 specification as a city.
 Each module is a district, sized by its number of assignments and placed
 next to the modules it imports from. Each type assignment is a building,
 coloured by kind, its height the log of its member count. Values, value sets
@@ -225,6 +226,37 @@ reads the prebuilt files in `datasets/`.
 Local checkouts replace either download:
 `-DFETCHCONTENT_SOURCE_DIR_ASN1C=<path>` (an unconfigured tree) and
 `-DFETCHCONTENT_SOURCE_DIR_STRATA=<path>`.
+
+## Status and follow-ups
+
+| RFC phase | Status |
+|---|---|
+| 0023 P0: repository, `asn1c.ref`, `strata.ref`, CI | done (#1) |
+| 0023 P1: extractor, Tier 1 + 2, open types, self-test | done (#2), plus SET OF sorting buffers |
+| 0023 P2: Strata strips, picking, labels | done (#3) |
+| 0023 P3: decoder side, canonical overlay | done for UPER (#4) |
+| 0023 P4: Tier 3 inference | done (inferred labels, marked); exact labels need fork ask F1 |
+| 0023 P5 / 0024 C3: browser build of the redistributable datasets | done (#6) |
+| 0024 C1: model from `libasn1parser`/`libasn1fix`, SCCs | done (#5) |
+| 0024 C2: districts, buildings, references, recursion | done (#5) |
+| 0024 C3: cross-link with the strips | `file:line` in the strip view's pick panel (#5) |
+
+Follow-ups, not done here:
+
+- **Datasets:** LTE RRC (3GPP TS 36.331) and ETSI ITS CAM/DENM, once their
+  redistribution terms are confirmed (RFC 0023 OQ3/OQ4). The fork's UMTS RRC
+  7.1.0 says "DO NOT REDISTRIBUTE", so it is only used locally as a stress
+  check (2,335 types walked in 0.25 s; its sample `DL-DCCH-Message` lays out
+  and passes the canonical check).
+- **Fork asks** (RFC 0023 F1/F2): an opt-in PER trace macro would make the
+  inferred labels exact; the bit position in `-P` output. Not filed.
+- **Code-size building height** (RFC 0024 OQ2's alternative): `codeBytes`
+  is in `asn1-schema/1` as `null`.
+- **The extractor in the page** (RFC 0023 OQ8's second option), so a visitor
+  can paste a value.
+- **APER import**, fragmented open types (16K octets or more), BER/DER and
+  OER lanes (RFC 0023 section 7).
+- **Hosting** the browser build (the CI artifact is a ready static site).
 
 ## Licence
 
