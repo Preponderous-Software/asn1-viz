@@ -235,8 +235,7 @@ void StripView::draw(Overlay& o, const CameraMatrices& cam, int w, int h) {
     o.lines.insert(o.lines.end(), byteTicks_.begin(), byteTicks_.end());
     const Layout& L = strips_.layout();
     std::vector<Rect> taken;
-    const float panelBottom = 16 + 8 * 20.0f;
-    taken.push_back({0, 0, static_cast<float>(w) * 0.55f, panelBottom});  // the pick panel
+    if (panelOnCanvas()) taken.push_back({0, 0, static_cast<float>(w) * 0.55f, (16 + 8 * 20.0f) * o.ui});  // the pick panel
 
     // Lane titles above each lane.
     for (size_t l = 0; l < strips_.laneCount(); ++l) {
@@ -246,9 +245,9 @@ void StripView::draw(Overlay& o, const CameraMatrices& cam, int w, int h) {
         if (!toScreen(cam, p, w, h, x, y)) continue;
         std::string t = upper(lane.codec) + "  " + withCommas(lane.encodedBits) + " bits";
         if (!lane.source.empty()) t = "imported " + t;
-        const float tw = 16.0f * static_cast<float>(t.size());
-        const float lift = lane.canonical.result.empty() && lane.source.empty() ? 0.0f : 24.0f;
-        const Rect r{x - tw / 2, y - 24 - lift, x + tw / 2, y - 8 - lift};
+        const float tw = 16.0f * o.ui * static_cast<float>(t.size());
+        const float lift = (lane.canonical.result.empty() && lane.source.empty() ? 0.0f : 24.0f) * o.ui;
+        const Rect r{x - tw / 2, y - 24 * o.ui - lift, x + tw / 2, y - 8 * o.ui - lift};
         if (!overlaps(taken, r)) {
             o.text(r.x0, r.y0, 16, t, kInk);
             taken.push_back(r);
@@ -258,8 +257,8 @@ void StripView::draw(Overlay& o, const CameraMatrices& cam, int w, int h) {
             if (!lane.canonical.result.empty())
                 c += rejected(lane) ? "   canonical UPER: REJECTED (lenient: " + lane.canonical.lenient + ")"
                                     : "   canonical UPER: ok";
-            const float cw = 8.0f * static_cast<float>(c.size());
-            o.text(x - cw / 2, y - 26, 8, c, rejected(lane) ? kAlarm : (lane.canonical.result.empty() ? kDim : kGood));
+            const float cw = 8.0f * o.ui * static_cast<float>(c.size());
+            o.text(x - cw / 2, y - 26 * o.ui, 8, c, rejected(lane) ? kAlarm : (lane.canonical.result.empty() ? kDim : kGood));
         }
         // Where the strict check fired: a red post at that bit, and the rule.
         if (rejected(lane)) {
@@ -269,8 +268,8 @@ void StripView::draw(Overlay& o, const CameraMatrices& cam, int w, int h) {
             float bx, by;
             if (toScreen(cam, b, w, h, bx, by)) {
                 const std::string what = "strict check fired here, bit " + withCommas(lane.canonical.bit);
-                o.text(bx + 6, by - 10, 8, what, kAlarm);
-                if (!lane.canonical.rule.empty()) o.text(bx + 6, by + 2, 8, lane.canonical.rule, kAlarm);
+                o.text(bx + 6 * o.ui, by - 10 * o.ui, 8, what, kAlarm);
+                if (!lane.canonical.rule.empty()) o.text(bx + 6 * o.ui, by + 2 * o.ui, 8, lane.canonical.rule, kAlarm);
             }
         }
     }
@@ -300,7 +299,7 @@ void StripView::draw(Overlay& o, const CameraMatrices& cam, int w, int h) {
         float x, y;
         if (toScreen(cam, strips_.anchor(sl, f.start, fh + 0.4f), w, h, x, y)) {
             const std::string t = leaf(f.path);
-            const Rect r{x, y - 22, x + 16.0f * static_cast<float>(t.size()), y - 6};
+            const Rect r{x, y - 22 * o.ui, x + 16.0f * o.ui * static_cast<float>(t.size()), y - 6 * o.ui};
             o.text(r.x0, r.y0, 16, t, kLink);
             taken.push_back(r);
         }
@@ -336,7 +335,8 @@ void StripView::draw(Overlay& o, const CameraMatrices& cam, int w, int h) {
                     continue;
                 const std::string t = leaf(f.path);
                 const float size = depth == 1 ? 16.0f : 8.0f;
-                const Rect r{x, y - size - 4, x + size * static_cast<float>(t.size()), y - 2};
+                const float px = size * o.ui;
+                const Rect r{x, y - px - 4 * o.ui, x + px * static_cast<float>(t.size()), y - 2 * o.ui};
                 if (r.x1 > static_cast<float>(w) || overlaps(taken, r)) continue;
                 o.text(r.x0, r.y0, size, t, depth == 1 ? kInk : kDim);
                 taken.push_back(r);
@@ -344,12 +344,43 @@ void StripView::draw(Overlay& o, const CameraMatrices& cam, int w, int h) {
         }
 
     // The pick panel.
-    float py = 16;
-    const size_t fit = static_cast<size_t>(std::max(8, (w - 16 - 7 * 16) / 16));
-    auto line = [&](const std::string& s, const float* c, float size = 16) {
-        o.text(16, py, size, s, c);
-        py += size + 4;
+    const float ui = o.ui;
+    if (panelOnCanvas()) {
+        float py = 16 * ui;
+        const size_t fit = static_cast<size_t>(std::max(8.0f, (static_cast<float>(w) - 16 * ui - 7 * 16 * ui) / (16 * ui)));
+        for (const PanelLine& l : panel(fit)) {
+            o.text(16 * ui, py, l.size, l.text, l.color);
+            py += (l.size + 4) * ui;
+        }
+    }
+
+    if (compact_) return;
+    // The legend, bottom left.
+    float ly = static_cast<float>(h) - (16 + 12.0f * static_cast<float>(legendKinds().size() + 2)) * ui;
+    for (const auto& k : legendKinds()) {
+        const Rgb c = kindColor(k.second, "");
+        const float rgba[4] = {c.r, c.g, c.b, 1};
+        o.text(16 * ui, ly, 8, "##", rgba, false);
+        o.text(36 * ui, ly, 8, k.first, kDim);
+        ly += 12 * ui;
+    }
+    o.text(16 * ui, ly, 8, "values: by ASN.1 type   dark top: inferred label   tall: a 1 bit", kDim);
+    ly += 12 * ui;
+    o.text(16 * ui, ly, 8, "drag orbit  right-drag pan  wheel zoom  click pick  U parent  N/P step  F focus  L links  H home",
+           kDim);
+}
+
+std::vector<PanelLine> StripView::panel(size_t fit) const {
+    std::vector<PanelLine> out;
+    auto line = [&](const std::string& t, const float* c, float size = 16) {
+        PanelLine l;
+        l.text = t;
+        std::copy(c, c + 4, l.color);
+        l.size = size;
+        out.push_back(std::move(l));
     };
+    const Layout& L = strips_.layout();
+    fit = std::max<size_t>(fit, 12);
     if (selLane_ >= 0) {
         const size_t sl = static_cast<size_t>(selLane_);
         const LayoutLane& lane = L.lanes[sl];
@@ -384,21 +415,7 @@ void StripView::draw(Overlay& o, const CameraMatrices& cam, int w, int h) {
         line(L.pdu + "  from " + L.valueSource, kInk);
         line("click a block to see its field, its kind and its bits", kDim);
     }
-
-    if (compact_) return;
-    // The legend, bottom left.
-    float ly = static_cast<float>(h) - 16 - 12.0f * static_cast<float>(legendKinds().size() + 2);
-    for (const auto& k : legendKinds()) {
-        const Rgb c = kindColor(k.second, "");
-        const float rgba[4] = {c.r, c.g, c.b, 1};
-        o.text(16, ly, 8, "##", rgba, false);
-        o.text(36, ly, 8, k.first, kDim);
-        ly += 12;
-    }
-    o.text(16, ly, 8, "values: by ASN.1 type   dark top: inferred label   tall: a 1 bit", kDim);
-    ly += 12;
-    o.text(16, ly, 8, "drag orbit  right-drag pan  wheel zoom  click pick  U parent  N/P step  F focus  L links  H home",
-           kDim);
+    return out;
 }
 
 }  // namespace asn1viz

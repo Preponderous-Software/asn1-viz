@@ -23,6 +23,7 @@ public:
     bool key(int32_t scancode) override;
     bool focus(Vec3& target) const override;
     void sync(strata::Engine& engine) override;
+    std::vector<PanelLine> panel(size_t fit) const override;
 
     // Selects a frame by its path in a lane (headless shots); false if absent.
     bool selectPath(const std::string& path, size_t lane = 0);

@@ -21,6 +21,7 @@ public:
     void pick(const StrataRayHit& hit) override;
     void draw(Overlay& overlay, const CameraMatrices& camera, int width, int height) override;
     void sync(strata::Engine& engine) override;
+    std::vector<PanelLine> panel(size_t fit) const override;
     bool key(int32_t scancode) override;
     bool focus(Vec3& target) const override;
 

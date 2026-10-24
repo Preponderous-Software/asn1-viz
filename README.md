@@ -115,6 +115,35 @@ does), and finds recursion with Tarjan's SCCs. It writes `asn1-schema/1`
 JSON. When a layout is opened, a `schema.json` beside it fills in the strip
 view's `file:line`.
 
+## In a browser
+
+The same views on Strata's WebGL 2 backend (Emscripten), with the committed
+datasets built in. Nothing is compiled in the page.
+
+| | |
+|---|---|
+| ![The browser build on a desktop: the certificate's bit strips](docs/media/browser-desktop.png) | ![On a phone: the PKIX city, with the pick panel as a sheet under the canvas](docs/media/browser-phone.png) |
+
+```sh
+# emsdk 6.0.11 (Strata's pin); with an older system Python, point EMSDK_PYTHON
+# at Python 3.10+ before sourcing emsdk_env.sh, and again after.
+source /path/to/emsdk/emsdk_env.sh
+emcmake cmake -S . -B build-web -DCMAKE_BUILD_TYPE=Release -DASN1VIZ_WITH_STRATA=OFF -DASN1VIZ_WEB=ON
+cmake --build build-web -j8
+ctest --test-dir build-web                      # the model tests, as wasm under Node
+# serve build-web/asn1-viz.html (+ .js, .wasm) as index.html; ?set=0..4 picks the dataset
+```
+
+Five datasets sit behind the buttons: the certificate's bits, the canonical
+check, every PER element (the demo message), the PKIX city and the recursion
+city. Drag to orbit, right-drag or two fingers to pan, wheel or the +/-
+buttons to zoom, and click or tap to pick. On a narrow screen the pick panel
+moves from the canvas into a sheet under it, and the canvas draws at most two
+pixels per CSS pixel. CI builds the page, runs the tests under Node, and
+smoke-tests it in headless Chromium on a desktop and an iPhone 13 profile.
+Every dataset must open and draw, and a real click or tap must change the
+selection.
+
 ## The extractor
 
 `asn1-viz-extract-<dataset>` decodes a value with an asn1c-generated codec,

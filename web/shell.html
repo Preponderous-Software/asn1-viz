@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>asn1-viz</title>
+<meta name="description" content="asn1-viz: ASN.1 encodings bit by bit (UPER vs APER, a canonical-UPER check) and ASN.1 schemas as cities, from asn1c, drawn in 3D on the Strata engine.">
+<style>
+  :root {
+    --bg: #090b12; --panel: rgba(16, 19, 30, 0.92); --line: #2a3046; --text: #e6eaf2; --dim: #9aa3b8;
+    --accent: #ffc23a; --btn: #1a1f30; --btn-on: #3a3118;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font: 14px/1.35 system-ui, -apple-system, "Segoe UI", sans-serif; overflow: hidden;
+    -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  body { display: flex; flex-direction: column; height: 100vh; height: 100dvh; }
+  .bar { flex: 0 0 auto; display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+    padding: 6px max(10px, env(safe-area-inset-left)); background: var(--panel); }
+  #top { border-bottom: 1px solid var(--line); padding-top: max(6px, env(safe-area-inset-top)); }
+  #tools { border-top: 1px solid var(--line); padding-bottom: max(6px, env(safe-area-inset-bottom)); }
+  .brand { font-weight: 700; letter-spacing: 0.03em; margin-right: 6px; }
+  .brand a { color: var(--text); text-decoration: none; }
+  #stage { position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden; }
+  canvas#canvas { display: block; width: 100%; height: 100%; touch-action: none; outline: none; background: #000; }
+  button { font: inherit; color: var(--text); background: var(--btn); border: 1px solid var(--line);
+    border-radius: 6px; padding: 7px 11px; min-height: 36px; cursor: pointer; touch-action: manipulation; }
+  button[aria-pressed="true"] { background: var(--btn-on); border-color: var(--accent); }
+  button:focus-visible { outline: 2px solid var(--accent); }
+  .group { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  .sep { width: 1px; align-self: stretch; background: var(--line); margin: 0 4px; }
+  #selected { color: var(--dim); font: 12px ui-monospace, monospace; margin-left: auto; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; max-width: 50%; }
+  #sheet { flex: 0 0 auto; display: none; padding: 6px 12px; background: var(--panel); border-top: 1px solid var(--line);
+    font: 12px/1.4 ui-monospace, monospace; max-height: 30vh; overflow-y: auto; -webkit-user-select: text; user-select: text; }
+  body.compact #sheet { display: block; }
+  #sheet div { white-space: pre-wrap; word-break: break-all; }
+  #sheet div.big { font-size: 13px; font-weight: 600; }
+  #loading { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); background: var(--panel);
+    border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; max-width: min(92vw, 460px); text-align: center; }
+  .for-strips, .for-city { display: none; }
+  body.strips .for-strips, body.city .for-city { display: flex; }
+  a { color: var(--accent); }
+  @media (max-width: 640px) {
+    #selected { max-width: 100%; margin-left: 0; flex-basis: 100%; }
+    button { padding: 6px 8px; }
+  }
+</style>
+</head>
+<body>
+<div id="top" class="bar">
+  <span class="brand"><a href="https://github.com/Preponderous-Software/asn1-viz" title="Source and documentation">asn1-viz</a></span>
+  <div class="group" role="group" aria-label="Dataset">
+    <button data-set="0" title="The RFC 3280 sample certificate in UPER and APER, one block per bit">Certificate bits</button>
+    <button data-set="1" title="A non-canonical copy, checked by asn1c's strict canonical-UPER decoder">Canonical check</button>
+    <button data-set="2" title="A small message with every structural element PER writes">Every PER element</button>
+    <button data-set="3" title="RFC 3280's PKIX modules as a city">PKIX city</button>
+    <button data-set="4" title="asn1c's circular-references test schema">Recursion city</button>
+  </div>
+  <span id="selected" aria-live="polite"></span>
+</div>
+
+<div id="stage">
+  <canvas id="canvas" tabindex="-1" oncontextmenu="event.preventDefault()"></canvas>
+</div>
+
+<div id="sheet" aria-live="polite"></div>
+
+<div id="tools" class="bar" role="group" aria-label="View">
+  <button data-key="74" title="Back to the whole view (H)">Home</button>
+  <button id="zoomIn" title="Zoom in (wheel)" aria-label="Zoom in">+</button>
+  <button id="zoomOut" title="Zoom out (wheel)" aria-label="Zoom out">&minus;</button>
+  <button data-key="9" title="Look at the selection (F)">Focus</button>
+  <span class="sep"></span>
+  <div class="group for-strips">
+    <button data-key="24" title="Select the whole field, then its parent (U)">Parent</button>
+    <button data-key="19" title="Previous segment (P)">&larr;</button>
+    <button data-key="17" title="Next segment (N)">&rarr;</button>
+    <button data-key="15" title="Link every field of one tree depth across the lanes (L)">Links</button>
+  </div>
+  <div class="group for-city">
+    <button data-key="30" title="Follow references 1 hop (1)">1 hop</button>
+    <button data-key="31" title="2 hops (2)">2</button>
+    <button data-key="32" title="3 hops (3)">3</button>
+    <button data-key="24" title="Go to a type that uses this one (U)">Used by</button>
+    <button data-key="21" title="Show or hide the recursion loops (R)">Loops</button>
+  </div>
+</div>
+
+<div id="loading">Loading asn1-viz&hellip;</div>
+
+<script>
+  'use strict';
+  const kinds = ['strips', 'strips', 'strips', 'city', 'city'];
+  const canvas = document.getElementById('canvas');
+  const loading = document.getElementById('loading');
+  const selected = document.getElementById('selected');
+  let api = null;
+
+  let lastW = 0, lastH = 0, lastDpr = 0;
+  function fit() {
+    // The engine sizes the canvas through SDL, which multiplies by the device
+    // pixel ratio; at most 2 drawn pixels per CSS pixel keeps phones quick.
+    const st = document.getElementById('stage');
+    const w = Math.max(1, st.clientWidth), h = Math.max(1, st.clientHeight);
+    const dpr = window.devicePixelRatio || 1;
+    if (api && (w !== lastW || h !== lastH || dpr !== lastDpr)) {
+      lastW = w; lastH = h; lastDpr = dpr;
+      const k = dpr > 2 ? 2 / dpr : 1;
+      const compact = w < 760;
+      document.body.classList.toggle('compact', compact);
+      api.resize(Math.round(w * k), Math.round(h * k), w, h, compact ? 1 : 0);
+    }
+  }
+  function choose(i) {
+    if (!api || !api.open(i)) return;
+    document.querySelectorAll('[data-set]').forEach(b => b.setAttribute('aria-pressed', String(Number(b.dataset.set) === i)));
+    document.body.classList.remove('strips', 'city');
+    document.body.classList.add(kinds[i]);
+    try { localStorage.setItem('asn1viz.dataset', String(i)); } catch (e) {}
+    canvas.focus();
+  }
+  const sheet = document.getElementById('sheet');
+  let lastSheet = '';
+  function refresh() {
+    if (!api) return;
+    const s = JSON.parse(api.status());
+    selected.textContent = s.selected ? 'selected: ' + s.selected : '';
+    const key = JSON.stringify(s.panel);
+    if (key !== lastSheet) {
+      lastSheet = key;
+      sheet.replaceChildren(...s.panel.map(l => {
+        const d = document.createElement('div');
+        d.textContent = l.text;
+        d.style.color = l.color;
+        if (!l.small) d.className = 'big';
+        return d;
+      }));
+    }
+  }
+
+  var Module = {
+    canvas: canvas,
+    print: (t) => console.log(t),
+    printErr: (t) => console.warn(t),
+    onRendererFailed: (why) => {
+      loading.textContent = 'This browser could not start WebGL 2: ' + why;
+    },
+    onViewerReady: () => {
+      api = {
+        open: Module.cwrap('asn1viz_open', 'number', ['number']),
+        resize: Module.cwrap('asn1viz_resize', null, ['number', 'number', 'number', 'number', 'number']),
+        key: Module.cwrap('asn1viz_key', null, ['number']),
+        zoom: Module.cwrap('asn1viz_zoom', null, ['number']),
+        click: Module.cwrap('asn1viz_click', null, ['number', 'number']),
+        status: Module.cwrap('asn1viz_status', 'string', []),
+      };
+      window.asn1viz = api;
+      loading.style.display = 'none';
+      fit();
+      let start = 0;
+      try { start = Number(localStorage.getItem('asn1viz.dataset')) || 0; } catch (e) {}
+      if (new URLSearchParams(location.search).has('set')) start = Number(new URLSearchParams(location.search).get('set')) || 0;
+      choose(Math.min(4, Math.max(0, start)));
+      fit();
+      setInterval(refresh, 300);
+    },
+  };
+  document.querySelectorAll('[data-set]').forEach(b => b.addEventListener('click', () => choose(Number(b.dataset.set))));
+  document.querySelectorAll('[data-key]').forEach(b => b.addEventListener('click', () => {
+    if (api) api.key(Number(b.dataset.key));
+    canvas.focus();
+  }));
+  document.getElementById('zoomIn').addEventListener('click', () => api && api.zoom(0.8));
+  document.getElementById('zoomOut').addEventListener('click', () => api && api.zoom(1.25));
+  window.addEventListener('resize', fit);
+  new ResizeObserver(fit).observe(document.getElementById('stage'));
+</script>
+{{{ SCRIPT }}}
+</body>
+</html>

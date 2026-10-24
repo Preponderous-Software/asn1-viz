@@ -31,10 +31,8 @@
 #include <memory>
 #include <string>
 
-#include "model/json.h"
 #include "model/layout.h"
-#include "model/schema.h"
-#include "view/city_view.h"
+#include "view/open.h"
 #include "view/shell.h"
 #include "view/strip_view.h"
 
@@ -126,45 +124,6 @@ Args parse(int argc, char** argv) {
     return a;
 }
 
-std::unique_ptr<Scene> makeScene(const Args& a, const json::Value& doc) {
-    const std::string format = doc.str("format");
-    if (format == "asn1-layout/1") {
-        const Layout layout = loadLayout(doc);
-        for (const LayoutLane& lane : layout.lanes) {
-            const std::string bad = validateLane(lane);
-            if (!bad.empty()) throw std::runtime_error(lane.codec + " lane: " + bad);
-        }
-        StripStyle style;
-        int64_t most = 0;
-        for (const LayoutLane& lane : layout.lanes) most = std::max(most, lane.bits);
-        style.rowBits = a.rowBits > 0 ? a.rowBits : most <= 256 ? 32 : 128;
-        if (most <= 256) style.laneGap = 6;
-        auto view = std::make_unique<StripView>(layout, style);
-        view->setLinkDepth(a.links);
-        if (!a.pick.empty() && !view->selectPath(a.pick, static_cast<size_t>(a.lane)))
-            throw std::runtime_error("no field " + a.pick + " in lane " + std::to_string(a.lane));
-        std::string schema = a.schema;
-        if (schema.empty()) {
-            const size_t slash = a.file.find_last_of("/\\");
-            const std::string beside = (slash == std::string::npos ? std::string() : a.file.substr(0, slash + 1)) + "schema.json";
-            if (std::ifstream(beside)) schema = beside;
-        }
-        if (!schema.empty()) view->setTypeLocations(loadSchemaFile(schema).locations());
-        return view;
-    }
-    if (format == "asn1-schema/1") {
-        auto view = std::make_unique<CityView>(loadSchema(doc), CityStyle{});
-        view->setHops(a.hops);
-        view->setShowRecursion(a.loops);
-        view->setCompact(a.width < 1000);
-        if (!a.pick.empty() && !view->selectName(a.pick)) throw std::runtime_error("no type " + a.pick);
-        return view;
-    }
-    throw std::runtime_error("not a document asn1-viz draws (format \"" + format + "\")");
-}
-
-// Visits the fields of the first lane at depths 1 and 2, in stream order,
-// easing the camera from one to the next (for the README's animation).
 void tour(Shell& shell, strata::Engine& engine, StripView& view, const Args& a) {
     view.setCompact(a.width < 1000);
     const LayoutLane& lane = view.scene().layout().lanes.front();
@@ -217,8 +176,16 @@ void adjustCamera(Shell& shell, const Args& a) {
 int main(int argc, char** argv) {
     const Args args = parse(argc, argv);
     try {
-        const json::Value doc = json::parseFile(args.file);
-        std::unique_ptr<Scene> scene = makeScene(args, doc);
+        OpenOptions oo;
+        oo.pick = args.pick;
+        oo.lane = args.lane;
+        oo.links = args.links;
+        oo.rowBits = args.rowBits;
+        oo.schema = args.schema;
+        oo.hops = args.hops;
+        oo.loops = args.loops;
+        oo.compact = args.width < 1000;
+        std::unique_ptr<Scene> scene = openScene(args.file, oo);
         strata::EngineDesc desc;
         desc.surface = args.headless ? STRATA_SURFACE_HEADLESS : STRATA_SURFACE_WINDOW;
         desc.width = args.width;
@@ -250,11 +217,8 @@ int main(int argc, char** argv) {
                 if (!strips) throw std::runtime_error("--tour draws bit strips only");
                 tour(shell, *engine, *strips, args);
             }
-            if (auto* strips = dynamic_cast<StripView*>(scene.get()); strips && strips->hasSelection())
-                std::printf("selected %s\n", strips->selectionPath().c_str());
-            if (auto* city = dynamic_cast<CityView*>(scene.get()); city && city->selected() >= 0)
-                std::printf("selected %s\n",
-                            city->city().schema().types[static_cast<size_t>(city->selected())].name.c_str());
+            const std::string selected = selectionOf(*scene);
+            if (!selected.empty()) std::printf("selected %s\n", selected.c_str());
             return 0;
         }
         while (!shell.quitRequested()) {
