@@ -188,6 +188,37 @@ const expected = [
   }
   if (probed < 2) await fail(`only ${probed} points well inside a block were found on the demo to check the pointer with`);
 
+  // The loading shell finished; and without WebGL 2 it shows the trailer (or
+  // its still) and says why, and the engine never downloads.
+  {
+    await page.waitForFunction(() => { const r = document.querySelector('.sk-loader'); return r && r.hidden; }, null, { timeout: 10000 }).catch(() => {});
+    const shell = await page.evaluate(() => {
+      const r = document.querySelector('.sk-loader');
+      return { hidden: !!(r && r.hidden), state: window.StrataLoader && StrataLoader.state };
+    });
+    if (!shell.hidden || shell.state !== 'done') await fail('the loading shell did not finish: ' + JSON.stringify(shell));
+    console.log('ok: the loading shell showed and is gone');
+    const bare = await browser.newContext({ ...base, userAgent: (base.userAgent || 'Mozilla/5.0') + ' asn1viz-smoke headless' });
+    await bare.addInitScript(() => {
+      const get = HTMLCanvasElement.prototype.getContext;
+      HTMLCanvasElement.prototype.getContext = function (t, o) { return t === 'webgl2' ? null : get.call(this, t, o); };
+    });
+    const p2 = await bare.newPage();
+    const engine = [];
+    p2.on('request', (r) => { if (/asn1-viz\.(wasm|js)$/.test(r.url())) engine.push(r.url()); });
+    await p2.goto(url, { waitUntil: 'commit' });
+    await p2.waitForFunction(() => window.StrataLoader && StrataLoader.state === 'fallback', null, { timeout: 30000 });
+    const fb = await p2.evaluate(() => {
+      const r = document.querySelector('.sk-loader');
+      return { text: r.innerText, media: !!r.querySelector('video, img'), wide: document.documentElement.scrollWidth > innerWidth };
+    });
+    await p2.screenshot({ path: path.join(outDir, 'no-webgl2.png') });
+    if (!/WebGL 2/.test(fb.text) || fb.wide) await fail('without WebGL 2 the shell did not say why: ' + JSON.stringify(fb));
+    if (engine.length) await fail('without WebGL 2 the engine still downloaded: ' + engine.join(', '));
+    console.log('ok: without WebGL 2 the shell ' + (fb.media ? 'shows the trailer and ' : '') + 'says why, and nothing of the engine downloads');
+    await bare.close();
+  }
+
   if (errors.length) await fail('page errors: ' + errors.join(' | '));
   await page.screenshot({ path: path.join(outDir, 'page.png') });
   await browser.close();
