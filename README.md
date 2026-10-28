@@ -170,7 +170,7 @@ the `.wasm` and hands its bytes to the engine, so nothing downloads twice. If
 asn1-viz can't run (no WebGL 2, the renderer fails, the engine stops, a lost
 WebGL context does not come back), the shell says why, and plays the trailer instead (the still under `prefers-reduced-motion`).
 A device that draws under 12 frames a second is offered the clip without
-losing the game (not in automated browsers or `?bench` runs).
+losing the live view (not in automated browsers or `?bench` runs).
 
 `web/strata-boot.js` bridges this classic (non-`MODULARIZE`) build to the
 loader: emcc's script tag sits inert in `<template id="strata-glue">`, the
