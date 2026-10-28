@@ -256,6 +256,16 @@ if(ASN1VIZ_WEB)
     "--embed-file=${CMAKE_CURRENT_SOURCE_DIR}/datasets@/datasets"
     "--shell-file=${CMAKE_CURRENT_SOURCE_DIR}/web/shell.html")
   set_property(TARGET asn1-viz-web APPEND PROPERTY LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/web/shell.html" ${ASN1VIZ_WEB_DATA})
+  # The loading shell (web/strata-kit, vendored from Strata) and its bridge go
+  # inline into the page, with the download's size (web/strata_page.cmake).
+  set_property(TARGET asn1-viz-web APPEND PROPERTY LINK_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/web/strata-kit/strata-loader.js"
+    "${CMAKE_CURRENT_SOURCE_DIR}/web/strata-boot.js")
+  add_custom_command(TARGET asn1-viz-web POST_BUILD
+    COMMAND "${CMAKE_COMMAND}" "-DHTML=$<TARGET_FILE:asn1-viz-web>"
+            "-DWASM=$<TARGET_FILE_DIR:asn1-viz-web>/$<TARGET_FILE_BASE_NAME:asn1-viz-web>.wasm"
+            "-DWEB=${CMAKE_CURRENT_SOURCE_DIR}/web" -P "${CMAKE_CURRENT_SOURCE_DIR}/web/strata_page.cmake"
+    VERBATIM)
   # The page's ?bench mode (web/bench.js) is served next to it.
   configure_file(web/bench.js "${CMAKE_CURRENT_BINARY_DIR}/bench.js" COPYONLY)
 endif()
