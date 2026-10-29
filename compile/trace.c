@@ -501,6 +501,8 @@ static void attribute_events(int *how_counts) {
 
 static int cmp_str(const void *a, const void *b) { return strcmp(*(char *const *)a, *(char *const *)b); }
 
+static int copy_file(const char *src, const char *dst);
+
 /* asn1c's importStandardModules (asn1c/asn1c.c), in name order. */
 static int import_standard_modules(asn1p_t *asn, const char *skeletons) {
     char dir[4096];
@@ -518,10 +520,18 @@ static int import_standard_modules(asn1p_t *asn, const char *skeletons) {
     }
     closedir(d);
     qsort(names, (size_t)n, sizeof *names, cmp_str);
+    /* Parsed from copies in the work directory, by a relative path: asn1c
+     * writes the module's path into the code it generates for it. */
+    if(mkdir("standard-modules", 0700)) return -1;
     int ret = 0;
     for(int i = 0; i < n; i++) {
-        char path[8192];
-        snprintf(path, sizeof path, "%s/%s", dir, names[i]);
+        char src[8192], path[8192];
+        snprintf(src, sizeof src, "%s/%s", dir, names[i]);
+        snprintf(path, sizeof path, "standard-modules/%s", names[i]);
+        if(copy_file(src, path)) {
+            ret = -1;
+            continue;
+        }
         asn1p_t *s = asn1p_parse_file(path, A1P_NOFLAGS);
         if(!s) {
             ret = -1;
@@ -666,6 +676,32 @@ static void remove_tree(const char *dir) {
     rmdir(dir);
 }
 
+static const char *absolute(const char *cwd, const char *p) {
+    if(p[0] == '/') return p;
+    size_t n = strlen(cwd) + strlen(p) + 2;
+    char *a = malloc(n);
+    snprintf(a, n, "%s/%s", cwd, p);
+    return a;
+}
+
+/* Copies a file; fails if dst exists. */
+static int copy_file(const char *src, const char *dst) {
+    FILE *in = fopen(src, "rb");
+    if(!in) return -1;
+    FILE *out = fopen(dst, "wbx");
+    if(!out) {
+        fclose(in);
+        return -1;
+    }
+    size_t len;
+    char *text = read_stream(in, &len);
+    int rc = fwrite(text, 1, len, out) == len ? 0 : -1;
+    free(text);
+    fclose(in);
+    if(fclose(out)) rc = -1;
+    return rc;
+}
+
 /* ---------------------------------------------------------------- main */
 
 static void usage(void) {
@@ -710,6 +746,37 @@ int main(int argc, char **argv) {
         return 1;
     }
     if(!schema_name) schema_name = schema_out ? base_name(schema_out) : NULL;
+
+    /* A work directory: the inputs are copied in and parsed by their
+     * basenames, because asn1c writes the schema path into the generated
+     * code ("found in ..."), and the trace must not depend on where the
+     * build tree is. The compiler writes into out/. */
+    char cwd[8192], dir[4096];
+    const char *tmp = getenv("TMPDIR");
+    snprintf(dir, sizeof dir, "%s/asn1-viz-compile-XXXXXX", tmp && *tmp ? tmp : "/tmp");
+    if(!getcwd(cwd, sizeof cwd) || !mkdtemp(dir)) {
+        fprintf(stderr, PROG ": no temporary directory: %s\n", strerror(errno));
+        return 1;
+    }
+    out_path = absolute(cwd, out_path);
+    if(schema_out) schema_out = absolute(cwd, schema_out);
+    for(int i = 0; i < ninputs; i++) {
+        char dst[8192];
+        snprintf(dst, sizeof dst, "%s/%s", dir, base_name(inputs[i]));
+        if(copy_file(inputs[i], dst)) {
+            fprintf(stderr, PROG ": cannot read %s (or two inputs share a name)\n", inputs[i]);
+            remove_tree(dir);
+            return 1;
+        }
+        inputs[i] = (char *)base_name(inputs[i]);
+    }
+    char outdir[8192];
+    snprintf(outdir, sizeof outdir, "%s/out", dir);
+    if(mkdir(outdir, 0700) || chdir(dir)) {
+        fprintf(stderr, PROG ": cannot use %s\n", dir);
+        remove_tree(dir);
+        return 1;
+    }
 
     const char *parse_status = "ok", *fix_status = "skipped", *compile_status = "skipped", *save_status = "skipped";
 
@@ -796,12 +863,8 @@ int main(int argc, char **argv) {
                        | A1C_GEN_PRINT | A1C_GEN_RFILL | A1C_GEN_EXAMPLE | A1C_GEN_JER | A1C_GEN_CBOR | A1C_GEN_CER
                        | A1C_DEBUG_OUTPUT_ORIGIN_LINES;
     if(ok) {
-        const char *tmp = getenv("TMPDIR");
-        char dir[4096];
-        snprintf(dir, sizeof dir, "%s/asn1-viz-compile-XXXXXX", tmp && *tmp ? tmp : "/tmp");
-        char cwd[8192];
-        if(!getcwd(cwd, sizeof cwd) || !mkdtemp(dir) || chdir(dir)) {
-            fprintf(stderr, PROG ": no temporary directory: %s\n", strerror(errno));
+        if(chdir("out")) {
+            fprintf(stderr, PROG ": cannot use %s/out\n", dir);
             compile_status = "failed";
         } else {
             /* The driver's argv: the inputs after the options. */
@@ -860,10 +923,11 @@ int main(int argc, char **argv) {
             }
             if(d) closedir(d);
             if(nG) qsort(G, (size_t)nG, sizeof *G, cmp_gfile);
-            if(chdir(cwd)) fprintf(stderr, PROG ": cannot return to %s\n", cwd);
-            remove_tree(dir);
+            if(chdir("..")) fprintf(stderr, PROG ": cannot return to %s\n", dir);
         }
     }
+    if(chdir(cwd)) fprintf(stderr, PROG ": cannot return to %s\n", cwd);
+    remove_tree(dir);
 
     /* Files to assignments, by asn1c's own file naming (asn1c_save.c). */
     long *code_bytes = NULL;

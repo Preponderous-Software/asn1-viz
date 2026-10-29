@@ -6,8 +6,8 @@
     { "name": "Demo", "file": "demo.asn1", "imports": [] }
   ],
   "types": [
-    { "id": 0, "module": 0, "name": "Msg", "kind": "SEQUENCE", "members": 6, "line": 8, "codeBytes": 64746, "scc": -1 },
-    { "id": 1, "module": 0, "name": "Item", "kind": "CHOICE", "members": 2, "line": 15, "codeBytes": 26917, "scc": -1 }
+    { "id": 0, "module": 0, "name": "Msg", "kind": "SEQUENCE", "members": 6, "line": 8, "codeBytes": 64680, "scc": -1 },
+    { "id": 1, "module": 0, "name": "Item", "kind": "CHOICE", "members": 2, "line": 15, "codeBytes": 26851, "scc": -1 }
   ],
   "refs": [
     { "from": 0, "to": 1, "member": "items" }
