@@ -1,0 +1,16 @@
+{
+  "format": "asn1-schema/1",
+  "asn1c": { "repo": "dmccoystephenson/asn1c", "commit": "b8971cc6bc24208d0b2d739c4268eb2c26e1e546" },
+  "fixer": { "result": 0, "warnings": 0 },
+  "modules": [
+    { "name": "Demo", "file": "demo.asn1", "imports": [] }
+  ],
+  "types": [
+    { "id": 0, "module": 0, "name": "Msg", "kind": "SEQUENCE", "members": 6, "line": 8, "codeBytes": 64746, "scc": -1 },
+    { "id": 1, "module": 0, "name": "Item", "kind": "CHOICE", "members": 2, "line": 15, "codeBytes": 26917, "scc": -1 }
+  ],
+  "refs": [
+    { "from": 0, "to": 1, "member": "items" }
+  ],
+  "sccs": []
+}

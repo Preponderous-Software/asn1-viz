@@ -21,6 +21,9 @@ struct SchemaType {
     std::string name, kind;
     int members = 0, line = 0;
     int scc = -1;  // index into Schema::sccs, or -1
+    // Bytes of the C asn1c generates for it (RFC 0034: written by
+    // asn1-viz-compile-trace), or -1 where the file says null.
+    int64_t codeBytes = -1;
 
     // A value, value set, object or field: a flat tile, not a building.
     bool flat() const;
