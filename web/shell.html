@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>asn1-viz</title>
-<meta name="description" content="asn1-viz: ASN.1 encodings bit by bit (UPER vs APER, a canonical-UPER check) and ASN.1 schemas as cities, from asn1c, drawn in 3D on the Strata engine.">
+<meta name="description" content="asn1-viz: ASN.1 encodings bit by bit (UPER vs APER, a canonical-UPER check), ASN.1 schemas as cities, and asn1c compiling a schema, replayed stage by stage, drawn in 3D on the Strata engine.">
 <style>
   :root {
     --bg: #090b12; --panel: rgba(16, 19, 30, 0.92); --line: #2a3046; --text: #e6eaf2; --dim: #9aa3b8;
@@ -40,8 +40,11 @@
   #sheet div.big { font-size: 13px; font-weight: 600; }
   #loading { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); background: var(--panel);
     border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; max-width: min(92vw, 460px); text-align: center; }
-  .for-strips, .for-city { display: none; }
-  body.strips .for-strips, body.city .for-city { display: flex; }
+  .for-strips, .for-city, .for-compile { display: none; }
+  body.strips .for-strips, body.city .for-city, body.compile .for-compile { display: flex; }
+  /* The compilation view's scrubber: a wide, finger-sized range. */
+  #scrub { flex: 1 1 160px; min-width: 120px; height: 28px; accent-color: var(--accent); margin: 0 4px; }
+  #stageName { color: var(--dim); font: 12px ui-monospace, monospace; min-width: 5.5em; }
   a { color: var(--accent); }
   @media (max-width: 640px) {
     #selected { max-width: 100%; margin-left: 0; flex-basis: 100%; }
@@ -58,6 +61,7 @@
     <button data-set="2" title="A small message with every structural element PER writes">Every PER element</button>
     <button data-set="3" title="RFC 3280's PKIX modules as a city">PKIX city</button>
     <button data-set="4" title="asn1c's circular-references test schema">Recursion city</button>
+    <button data-set="5" title="One asn1c run replayed over the demo schema's city: parse, fix, compile, save">Compilation</button>
   </div>
   <span id="selected" aria-live="polite"></span>
 </div>
@@ -87,6 +91,16 @@
     <button data-key="24" title="Go to a type that uses this one (U)">Used by</button>
     <button data-key="21" title="Show or hide the recursion loops (R)">Loops</button>
   </div>
+  <div class="group for-compile" style="flex: 1 1 100%">
+    <button data-key="47" title="Previous stage ([)" aria-label="Previous stage">&#x23EE;</button>
+    <button data-key="54" title="Previous step (,)" aria-label="Previous step">&lsaquo;</button>
+    <button id="play" data-key="44" title="Play or pause (Space)" aria-label="Play or pause">Play</button>
+    <button data-key="55" title="Next step (.)" aria-label="Next step">&rsaquo;</button>
+    <button data-key="48" title="Next stage (])" aria-label="Next stage">&#x23ED;</button>
+    <input id="scrub" type="range" min="0" max="1000" value="0" aria-label="Scrub through the compilation">
+    <span id="stageName"></span>
+    <button id="lookups" data-key="15" title="Show or hide the fixer's lookup events (L)" aria-pressed="true">Lookups</button>
+  </div>
 </div>
 
 <div id="loading" style="display: none"></div>
@@ -95,7 +109,7 @@
 <script src="bench.js"></script>
 <script>
   'use strict';
-  const kinds = ['strips', 'strips', 'strips', 'city', 'city'];
+  const kinds = ['strips', 'strips', 'strips', 'city', 'city', 'compile'];
   const canvas = document.getElementById('canvas');
   const loading = document.getElementById('loading');
   const selected = document.getElementById('selected');
@@ -119,17 +133,26 @@
   function choose(i, remember = true) {
     if (!api || !api.open(i)) return;
     document.querySelectorAll('[data-set]').forEach(b => b.setAttribute('aria-pressed', String(Number(b.dataset.set) === i)));
-    document.body.classList.remove('strips', 'city');
+    document.body.classList.remove('strips', 'city', 'compile');
     document.body.classList.add(kinds[i]);
     if (remember) try { localStorage.setItem('asn1viz.dataset', String(i)); } catch (e) {}
     canvas.focus();
   }
   const sheet = document.getElementById('sheet');
+  const scrub = document.getElementById('scrub');
+  let scrubbing = false;
   let lastSheet = '';
   function refresh() {
     if (!api) return;
     const s = JSON.parse(api.status());
     selected.textContent = s.selected ? 'selected: ' + s.selected : '';
+    if (s.replay) {
+      // The range follows the playhead, except while a finger or the mouse holds it.
+      if (!scrubbing) scrub.value = String(Math.round(s.replay.bar * 1000));
+      document.getElementById('play').textContent = s.replay.playing ? 'Pause' : 'Play';
+      document.getElementById('lookups').setAttribute('aria-pressed', String(s.replay.lookups));
+      document.getElementById('stageName').textContent = s.replay.stage;
+    }
     const key = JSON.stringify(s.panel);
     if (key !== lastSheet) {
       lastSheet = key;
@@ -160,6 +183,7 @@
         click: Module.cwrap('asn1viz_click', null, ['number', 'number']),
         status: Module.cwrap('asn1viz_status', 'string', []),
         benchView: Module.cwrap('asn1viz_bench_view', null, ['number', 'number', 'number']),
+        seek: Module.cwrap('asn1viz_seek', null, ['number']),
       };
       window.asn1viz = api;
       loading.style.display = 'none';
@@ -177,10 +201,10 @@
           path: (u) => api.benchView(360 * u, 30 + 15 * Math.sin(2 * Math.PI * u), 1 - 0.35 * Math.sin(Math.PI * u)),
         });
       } else {
-        choose(Math.min(4, Math.max(0, start)));
+        choose(Math.min(kinds.length - 1, Math.max(0, start)));
       }
       fit();
-      setInterval(refresh, 300);
+      setInterval(refresh, 200);
     },
   };
   document.querySelectorAll('[data-set]').forEach(b => b.addEventListener('click', () => choose(Number(b.dataset.set))));
@@ -188,6 +212,9 @@
     if (api) api.key(Number(b.dataset.key));
     canvas.focus();
   }));
+  scrub.addEventListener('input', () => { scrubbing = true; if (api) api.seek(Number(scrub.value) / 1000); });
+  scrub.addEventListener('change', () => { scrubbing = false; canvas.focus(); });
+  scrub.addEventListener('pointerup', () => { scrubbing = false; });
   document.getElementById('zoomIn').addEventListener('click', () => api && api.zoom(0.8));
   document.getElementById('zoomOut').addEventListener('click', () => api && api.zoom(1.25));
   window.addEventListener('resize', fit);

@@ -4,10 +4,12 @@
 #include <fstream>
 #include <stdexcept>
 
+#include "model/compile.h"
 #include "model/json.h"
 #include "model/layout.h"
 #include "model/schema.h"
 #include "view/city_view.h"
+#include "view/compile_view.h"
 #include "view/strip_view.h"
 
 namespace asn1viz {
@@ -48,11 +50,33 @@ std::unique_ptr<Scene> openScene(const std::string& file, const OpenOptions& a) 
         if (!a.pick.empty() && !view->selectName(a.pick)) throw std::runtime_error("no type " + a.pick);
         return view;
     }
+    if (format == "asn1-compile/1") {
+        // The city the trace replays over: the asn1-schema/1 file it names, beside it.
+        const std::string named = doc.str("schema");
+        if (named.empty()) throw std::runtime_error("asn1-compile/1: no schema named");
+        const size_t slash = file.find_last_of("/\\");
+        const bool absolute = named[0] == '/' || (named.size() > 1 && named[1] == ':');
+        const std::string schemaFile =
+            !a.schema.empty() ? a.schema
+            : absolute        ? named
+                              : (slash == std::string::npos ? std::string() : file.substr(0, slash + 1)) + named;
+        const Schema schema = loadSchemaFile(schemaFile);
+        const CompileTrace trace = loadCompileTrace(doc);
+        if (!trace.matches(schema)) throw std::runtime_error("asn1-compile/1: a type id is not one of " + schemaFile + "'s");
+        auto view = std::make_unique<CompileView>(schema, trace, CityStyle{});
+        view->setCompact(a.compact);
+        if (a.hideLookups) view->replay().setLookupFiltered(true);
+        if (a.at >= 0) view->replay().seekFraction(a.at);
+        else view->replay().setPlaying(true);
+        if (!a.pick.empty() && !view->selectName(a.pick)) throw std::runtime_error("no type " + a.pick);
+        return view;
+    }
     throw std::runtime_error("not a document asn1-viz draws (format \"" + format + "\")");
 }
 
 std::string selectionOf(const Scene& scene) {
     if (const auto* s = dynamic_cast<const StripView*>(&scene)) return s->hasSelection() ? s->selectionPath() : "";
+    if (const auto* v = dynamic_cast<const CompileView*>(&scene)) return v->selectionName();
     if (const auto* c = dynamic_cast<const CityView*>(&scene))
         return c->selected() >= 0 ? c->city().schema().types[static_cast<size_t>(c->selected())].name : "";
     return "";

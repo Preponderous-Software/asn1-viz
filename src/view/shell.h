@@ -61,6 +61,15 @@ public:
         (void)scancode;
         return false;
     }
+    // A press (or, while held, a drag) at a drawable pixel. True if the
+    // scene used it for its own on-canvas control (the compilation view's
+    // scrubber): the shell then neither orbits nor picks until the release.
+    virtual bool press(float px, float py, bool dragging) {
+        (void)px;
+        (void)py;
+        (void)dragging;
+        return false;
+    }
     // The pick panel's lines; `fit` is the most characters a line may hold.
     virtual std::vector<PanelLine> panel(size_t fit) const {
         (void)fit;
@@ -116,6 +125,7 @@ private:
     float ui_ = 1;
     bool quit_ = false;
     int dragButton_ = 0;
+    bool sceneDrag_ = false;  // a press the scene took (its scrubber)
     float dragDistance_ = 0;
     float lastX_ = 0, lastY_ = 0;
 };

@@ -9,7 +9,9 @@
 // block picks the same block as the page's own pick call at that point (CSS
 // pixels, no SDL), so SDL's pointer units are scaled right at the profile's
 // device pixel ratio (1 on the desktop, 3 on the iPhone 13; --dpr overrides
-// the phone's). Writes a PNG per dataset.
+// the phone's). The compilation replay plays, pauses, steps a stage, and
+// seeks from the page's range and from a click (or tap) on the canvas's own
+// scrubber. Writes a PNG per dataset.
 'use strict';
 const fs = require('fs');
 const path = require('path');
@@ -82,6 +84,9 @@ const expected = [
   ['demo', 'Msg.period'],
   ['city', 'Certificate'],
   ['recursion', 'Everything'],
+  // The replay opens at its start: two footprints and the empty library
+  // plots draw fewer colours than a finished scene.
+  ['compile', 'Msg', 20],
 ];
 
 (async () => {
@@ -118,7 +123,49 @@ const expected = [
     const shot = await canvas.screenshot({ path: path.join(outDir, `${expected[i][0]}.png`), timeout: 180000 });
     const colours = colourCount(shot);
     console.log(`${s.dataset}: selected ${s.selected}, ${colours} colours`);
-    if (colours < 40) await fail(`${s.dataset} drew only ${colours} colours`);
+    if (colours < (expected[i][2] || 40)) await fail(`${s.dataset} drew only ${colours} colours`);
+  }
+
+  // The compilation replay (RFC 0034 K1): it plays on opening; the page's
+  // buttons pause it and step a stage; the range seeks; and a click or tap on
+  // the scrubber drawn along the canvas's bottom seeks through SDL's pointer
+  // (not a pick: the selection stays).
+  {
+    await page.locator('[data-set="5"]').click();
+    await page.waitForTimeout(300);
+    const r0 = (await status()).replay;
+    await page.waitForTimeout(1500);
+    const r1 = (await status()).replay;
+    if (!r0 || !r1) await fail('the compilation view reports no replay state');
+    console.log(`compile: ${r0.steps} steps, ${r0.stage} ${r0.pos} -> ${r1.stage} ${r1.pos}, playing ${r1.playing}`);
+    if (!(r1.pos > r0.pos) || !r1.playing) await fail('the compilation replay is not playing');
+    await page.locator('#play').click();
+    await page.waitForTimeout(400);
+    const paused = (await status()).replay;
+    await page.waitForTimeout(600);
+    const still = (await status()).replay;
+    if (paused.playing || still.pos !== paused.pos) await fail('Pause did not stop the replay: ' + JSON.stringify([paused, still]));
+    await page.locator('[data-key="48"]').click();  // next stage
+    await page.waitForTimeout(400);
+    const next = (await status()).replay;
+    console.log(`next stage: ${paused.stage} -> ${next.stage}`);
+    if (next.stage === paused.stage) await fail('the next-stage button did not move to another stage');
+    await page.locator('#scrub').fill('500');
+    await page.waitForTimeout(400);
+    const mid = (await status()).replay;
+    console.log(`range at 0.5: bar ${mid.bar.toFixed(3)} (${mid.stage})`);
+    if (Math.abs(mid.bar - 0.5) > 0.01) await fail('the range did not seek: ' + JSON.stringify(mid));
+    const b = await canvas.boundingBox();
+    const sel = (await status()).selected;
+    const x = b.x + b.width * 0.85, y = b.y + b.height - 12;
+    if (phone) await page.touchscreen.tap(x, y);
+    else await page.mouse.click(x, y);
+    await page.waitForTimeout(600);
+    const tapped = await status();
+    console.log(`${phone ? 'tap' : 'click'} on the canvas scrubber at 85%: bar ${tapped.replay.bar.toFixed(3)} (${tapped.replay.stage}), selected ${tapped.selected}`);
+    if (Math.abs(tapped.replay.bar - 0.85) > 0.08) await fail('a click on the canvas scrubber did not seek there: ' + JSON.stringify(tapped.replay));
+    if (tapped.selected !== sel) await fail('a click on the scrubber changed the selection');
+    await canvas.screenshot({ path: path.join(outDir, 'compile-seeked.png'), timeout: 180000 });
   }
 
   // A real click or tap on the canvas, through SDL and the ray cast. On the

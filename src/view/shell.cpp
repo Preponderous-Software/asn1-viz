@@ -112,12 +112,17 @@ void Shell::handle(const StrataEvent& e) {
             engine_.drawableSize(width_, height_);
             break;
         case STRATA_EVENT_MOUSE_BUTTON_DOWN:
-            dragButton_ = e.button;
+            sceneDrag_ = e.button == 1 && scene_.press(e.x * pointerX_, e.y * pointerY_, false);
+            dragButton_ = sceneDrag_ ? 0 : e.button;
             dragDistance_ = 0;
             lastX_ = e.x;
             lastY_ = e.y;
             break;
         case STRATA_EVENT_MOUSE_BUTTON_UP:
+            if (sceneDrag_) {
+                sceneDrag_ = false;
+                break;
+            }
             if (e.button == 1 && dragDistance_ < 4) pickAt(e.x * pointerX_, e.y * pointerY_);  // a click, not a drag
             dragButton_ = 0;
             break;
@@ -125,6 +130,10 @@ void Shell::handle(const StrataEvent& e) {
             const float dx = e.x - lastX_, dy = e.y - lastY_;
             lastX_ = e.x;
             lastY_ = e.y;
+            if (sceneDrag_) {
+                scene_.press(e.x * pointerX_, e.y * pointerY_, true);
+                break;
+            }
             if (!dragButton_) break;
             dragDistance_ += std::fabs(dx) + std::fabs(dy);
             if (dragButton_ == 1) {
