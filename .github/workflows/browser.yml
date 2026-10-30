@@ -56,7 +56,7 @@ jobs:
         run: |
           mkdir -p web-site
           cp build-web/asn1-viz.html web-site/index.html
-          cp build-web/asn1-viz.js build-web/asn1-viz.wasm build-web/bench.js web-site/
+          cp build-web/asn1-viz.js build-web/asn1-viz.wasm build-web/bench.js build-web/pkix-compile.json build-web/demo-compile-no-gen-OER.json web-site/
           ls -l web-site
           echo "site: $(du -sh web-site | cut -f1)"
 

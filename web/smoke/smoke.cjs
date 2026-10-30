@@ -11,8 +11,12 @@
 // device pixel ratio (1 on the desktop, 3 on the iPhone 13; --dpr overrides
 // the phone's). The compilation replay plays, pauses, steps a stage, and
 // seeks from the page's range and from a click (or tap) on the canvas's own
-// scrubber; Compare switches the demo pair into compare mode and back.
-// Writes a PNG per dataset.
+// scrubber; Compare fetches the demo's second trace (once) and switches the
+// pair into compare mode and back. The
+// PKIX trace is not in the first download: choosing PKIX in the compilation
+// view fetches it once, and its replay plays; the frame rate of the PKIX and
+// demo replays is logged (headless Chromium draws on the CPU, so it is a
+// floor, not a device's number). Writes a PNG per dataset.
 'use strict';
 const fs = require('fs');
 const path = require('path');
@@ -98,6 +102,10 @@ const expected = [
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e)));
   page.on('console', (m) => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
+  const traceFetches = [];
+  page.on('request', (r) => { if (/pkix-compile\.json$/.test(r.url())) traceFetches.push(r.url()); });
+  const compareFetches = [];
+  page.on('request', (r) => { if (/demo-compile-no-gen-OER\.json$/.test(r.url())) compareFetches.push(r.url()); });
   const fail = async (why) => {
     console.error('FAIL: ' + why);
     await page.screenshot({ path: path.join(outDir, 'failure.png') }).catch(() => {});
@@ -173,8 +181,11 @@ const expected = [
   // (default flags against -no-gen-OER) as one city, the replay's controls
   // step aside, and a second press goes back to the replay.
   {
+    if (compareFetches.length) await fail('the comparison trace was fetched before Compare was pressed');
     await page.locator('#compare').click();
-    await page.waitForTimeout(1000);
+    // The first press fetches the comparison trace (not in the first download).
+    await page.waitForFunction(() => { const s = JSON.parse(window.asn1viz.status()); return s.compare && s.compare.on; }, null, { timeout: 30000 }).catch(() => {});
+    await page.waitForTimeout(500);
     const on = await status();
     const summary = on.panel.map((l) => l.text).join(' | ');
     console.log(`compare: on ${on.compare && on.compare.on}, selected ${on.selected}; ${summary}`);
@@ -190,6 +201,12 @@ const expected = [
     await page.waitForTimeout(600);
     const off = await status();
     if (off.compare.on || !off.replay) await fail('a second press did not go back to the replay: ' + JSON.stringify(off.compare));
+    await page.locator('#compare').click();
+    await page.waitForTimeout(600);
+    if (!(await status()).compare.on) await fail('a third press did not compare again');
+    await page.locator('#compare').click();
+    await page.waitForTimeout(600);
+    if (compareFetches.length !== 1) await fail(`the comparison trace was fetched ${compareFetches.length} times, not once`);
   }
 
   // A real click or tap on the canvas, through SDL and the ray cast. On the
@@ -258,6 +275,65 @@ const expected = [
     }
   }
   if (probed < 2) await fail(`only ${probed} points well inside a block were found on the demo to check the pointer with`);
+
+  // The PKIX replay (RFC 0034 K3): fetched only when chosen, then it plays.
+  // Last of the live checks, so its 1.4 MB trace and big scene cannot slow
+  // the pointer probes above (they time a resize of the page's sheet).
+  // Frames are counted with requestAnimationFrame, which drives the engine's
+  // main loop, over a few seconds of each replay playing.
+  {
+    if (traceFetches.length) await fail('the PKIX trace was fetched before it was chosen: ' + traceFetches.join(', '));
+    const fps = (ms) => page.evaluate((span) => new Promise((done) => {
+      let n = 0;
+      const t0 = performance.now();
+      const tick = () => { n++; if (performance.now() - t0 < span) requestAnimationFrame(tick); else done(n * 1000 / (performance.now() - t0)); };
+      requestAnimationFrame(tick);
+    }), ms);
+    await page.locator('[data-set="5"]').click();  // the compilation view, on the demo
+    await page.waitForTimeout(800);
+    const demoFps = await fps(3000);
+    await page.locator('[data-trace="6"]').click();
+    try {
+      await page.waitForFunction(() => JSON.parse(window.asn1viz.status()).dataset === 'compile-pkix', null, { timeout: 60000 });
+    } catch (e) {
+      await fail('choosing PKIX never opened its replay: ' + (await page.locator('#traceNote').textContent()) + ' ' + errors.join(' | '));
+    }
+    const p0 = await status();
+    if (p0.selected !== 'Certificate') await fail(`compile-pkix: selected ${p0.selected}, not Certificate`);
+    const pressed = await page.locator('[data-trace="6"]').getAttribute('aria-pressed');
+    if (pressed !== 'true') await fail('the PKIX button is not shown as chosen');
+    const pkixFps = await fps(3000);
+    const p1 = await status();
+    console.log(`compile-pkix: ${p1.replay.steps} steps, ${p0.replay.stage} ${p0.replay.pos} -> ${p1.replay.stage} ${p1.replay.pos}, playing ${p1.replay.playing}`);
+    console.log(`replay frame rate (headless, software GL): demo ${demoFps.toFixed(1)} fps, PKIX ${pkixFps.toFixed(1)} fps`);
+    if (!(p1.replay.pos > p0.replay.pos) || !p1.replay.playing) await fail('the PKIX replay is not playing');
+    if (pkixFps < 2) await fail(`the PKIX replay drew ${pkixFps.toFixed(1)} frames a second`);
+    // Each later stage, playing: the fixer's (the most steps, a pulse per
+    // event) and the compiler's (floors of every building, rebuilt as files
+    // land), reached with the next-stage button.
+    for (const want of ['Fix', 'Compile']) {
+      for (let k = 0; k < 4 && (await status()).replay.stage !== want; k++) {
+        await page.locator('[data-key="48"]').click();
+        await page.waitForTimeout(300);
+      }
+      const r = (await status()).replay;
+      if (r.stage !== want) await fail(`the next-stage button never reached ${want} on PKIX: ${JSON.stringify(r)}`);
+      if (!r.playing) await page.locator('#play').click();
+      await page.waitForTimeout(300);
+      const f = await fps(3000);
+      console.log(`PKIX in ${want}: ${f.toFixed(1)} fps`);
+      if (f < 2) await fail(`the PKIX replay drew ${f.toFixed(1)} frames a second in ${want}`);
+    }
+    const shot = await canvas.screenshot({ path: path.join(outDir, 'compile-pkix.png'), timeout: 180000 });
+    const colours = colourCount(shot);
+    console.log(`compile-pkix: ${colours} colours`);
+    if (colours < 40) await fail(`compile-pkix drew only ${colours} colours`);
+    await page.locator('[data-trace="5"]').click();
+    await page.waitForTimeout(500);
+    await page.locator('[data-trace="6"]').click();
+    await page.waitForFunction(() => JSON.parse(window.asn1viz.status()).dataset === 'compile-pkix', null, { timeout: 30000 });
+    if (traceFetches.length !== 1) await fail(`the PKIX trace was fetched ${traceFetches.length} times, not once`);
+  }
 
   // The loading shell finished; and without WebGL 2 it shows the trailer (or
   // its still) and says why, and the engine never downloads.

@@ -9,6 +9,7 @@
 // desktop (drag to orbit, right-drag or two fingers to pan, wheel to zoom,
 // click or tap to pick).
 #include <cstdio>
+#include <fstream>
 #include <functional>
 #include <memory>
 #include <string>
@@ -42,6 +43,9 @@ const Dataset kSets[] = {
     {"recursion", "/datasets/recursion/schema.json", "Everything", 0, 0, 2},
     // Compared with the same pin's run without OER: what OER costs per type.
     {"compile", "/datasets/demo/compile.json", "Msg", 0, 0, 1, "/datasets/demo/compile-no-gen-OER.json"},
+    // Not built in: the page fetches pkix-compile.json and writes it here
+    // first. Its comparison (-fwide-types) is for the desktop.
+    {"compile-pkix", "/datasets/pkix/compile.json", "Certificate", 0, 0, 1},
 };
 constexpr int kSetCount = static_cast<int>(sizeof kSets / sizeof kSets[0]);
 
@@ -140,6 +144,11 @@ int toggleCompare() {
     }
     if (app->dataset < 0 || !kSets[app->dataset].compareWith) return 0;
     const Dataset& d = kSets[app->dataset];
+    // The second trace is not built in: the page fetches it, then asks again.
+    if (!std::ifstream(d.compareWith)) {
+        emscripten_run_script("if (Module.onCompareWanted) Module.onCompareWanted()");
+        return 0;
+    }
     OpenOptions o;
     o.pick = d.pick;
     o.compact = app->compact;

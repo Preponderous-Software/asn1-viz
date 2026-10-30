@@ -604,6 +604,22 @@ typedef struct {
     char group; /* 'c'ompiled, 's'keleton, 'g'enerated */
 } gfile_t;
 
+/* Every compiler source line seen in an origin comment, as "src\tfn": a
+ * line of asn1c's source belongs to one function, so a reader can tell
+ * which of a file's bySrc lines a function's band holds. */
+static histo_t src_fns;
+
+static int cmp_src_fn(const void *a, const void *b) {
+    const hist_t *x = a, *y = b;
+    const char *xt = strchr(x->name, '\t'), *yt = strchr(y->name, '\t');
+    const size_t xl = (size_t)(xt - x->name), yl = (size_t)(yt - y->name);
+    const int c = strncmp(x->name, y->name, xl < yl ? xl : yl);
+    if(c) return c;
+    if(xl != yl) return xl < yl ? -1 : 1;
+    if(x->count != y->count) return x->count > y->count ? -1 : 1;
+    return strcmp(xt, yt);
+}
+
 /* "\t// asn1c_C.c:4166 emit_member_table()" at the end of a line: its
  * length, or 0. */
 static size_t origin_of(const char *line, char *src, size_t srcsz, char *fn, size_t fnsz) {
@@ -647,6 +663,9 @@ static void scan_file(gfile_t *f, const char *text, size_t len) {
             f->bytes -= (long)comment;
             histo_add(&f->by_fn, fn, 1);
             histo_add(&f->by_src, src, 1);
+            char pair[sizeof src + sizeof fn + 1];
+            snprintf(pair, sizeof pair, "%s\t%s", src, fn);
+            histo_add(&src_fns, pair, 1);
         } else {
             f->unannotated++;
         }
@@ -1173,7 +1192,24 @@ int main(int argc, char **argv) {
         write_hist(out, &g->by_src);
         fputs(" }", out);
     }
-    fprintf(out, "\n    ]\n  },\n");
+    fprintf(out, "\n    ],\n    \"sources\": {");
+    /* src -> fn, sorted by src; a line seen under two functions (not at the
+     * pin) keeps its busiest. */
+    qsort(src_fns.v, (size_t)src_fns.n, sizeof *src_fns.v, cmp_src_fn);
+    for(int h = 0, w = 0; h < src_fns.n; h++) {
+        const char *name = src_fns.v[h].name, *tab = strchr(name, '\t');
+        if(h) {
+            const char *prev = src_fns.v[h - 1].name, *ptab = strchr(prev, '\t');
+            if(ptab - prev == tab - name && !strncmp(prev, name, (size_t)(tab - name))) continue;
+        }
+        char src[512];
+        snprintf(src, sizeof src, "%.*s", (int)(tab - name), name);
+        fputs(w++ ? ",\n      " : "\n      ", out);
+        asn1viz_json_string(out, src);
+        fputs(": ", out);
+        asn1viz_json_string(out, tab + 1);
+    }
+    fprintf(out, "%s}\n  },\n", src_fns.n ? "\n    " : "");
 
     /* save */
     fprintf(out, "  \"save\": {\n    \"status\": \"%s\",\n    \"skeletons\": [", save_status);

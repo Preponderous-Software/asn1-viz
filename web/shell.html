@@ -44,9 +44,10 @@
   body.strips .for-strips, body.city .for-city, body.compile .for-compile { display: flex; }
   /* The compilation view's scrubber: a wide, finger-sized range. */
   #scrub { flex: 1 1 160px; min-width: 120px; height: 28px; accent-color: var(--accent); margin: 0 4px; }
+  #traceNote { color: var(--dim); font: 12px ui-monospace, monospace; }
   #stageName { color: var(--dim); font: 12px ui-monospace, monospace; min-width: 5.5em; }
   /* Compare mode (RFC 0034 G4): the replay's controls step aside. */
-  body.comparing .for-compile > :not(#compare) { display: none; }
+  body.comparing .for-compile > :not(#compare):not(#schemas) { display: none; }
   a { color: var(--accent); }
   @media (max-width: 640px) {
     #selected { max-width: 100%; margin-left: 0; flex-basis: 100%; }
@@ -63,7 +64,7 @@
     <button data-set="2" title="A small message with every structural element PER writes">Every PER element</button>
     <button data-set="3" title="RFC 3280's PKIX modules as a city">PKIX city</button>
     <button data-set="4" title="asn1c's circular-references test schema">Recursion city</button>
-    <button data-set="5" title="One asn1c run replayed over the demo schema's city: parse, fix, compile, save">Compilation</button>
+    <button data-set="5" title="One asn1c run replayed over a schema's city: parse, fix, compile, save">Compilation</button>
   </div>
   <span id="selected" aria-live="polite"></span>
 </div>
@@ -94,6 +95,11 @@
     <button data-key="21" title="Show or hide the recursion loops (R)">Loops</button>
   </div>
   <div class="group for-compile" style="flex: 1 1 100%">
+    <div id="schemas" class="group" role="group" aria-label="Schema compiled">
+      <button data-trace="5" title="The demo module: every PER element in one small schema">Demo</button>
+      <button data-trace="6" title="RFC 3280's PKIX modules (a 1.4 MB trace, fetched when chosen)">PKIX</button>
+      <span id="traceNote" aria-live="polite"></span>
+    </div>
     <button data-key="47" title="Previous stage ([)" aria-label="Previous stage">&#x23EE;</button>
     <button data-key="54" title="Previous step (,)" aria-label="Previous step">&lsaquo;</button>
     <button id="play" data-key="44" title="Play or pause (Space)" aria-label="Play or pause">Play</button>
@@ -112,7 +118,10 @@
 <script src="bench.js"></script>
 <script>
   'use strict';
-  const kinds = ['strips', 'strips', 'strips', 'city', 'city', 'compile'];
+  // 6 is the PKIX compilation replay: not a dataset button of its own but
+  // the Compilation view's other schema, and not built into the page.
+  const kinds = ['strips', 'strips', 'strips', 'city', 'city', 'compile', 'compile'];
+  const PKIX_TRACE = 6;
   const canvas = document.getElementById('canvas');
   const loading = document.getElementById('loading');
   const selected = document.getElementById('selected');
@@ -133,9 +142,74 @@
       api.resize(Math.round(w * k), Math.round(h * k), w, h, compact ? 1 : 0);
     }
   }
+  // The PKIX trace is fetched the first time it is chosen and written where
+  // the viewer reads it; the page's first download stays without it.
+  const traceNote = document.getElementById('traceNote');
+  let pkixTrace = null;
+  function loadPkixTrace() {
+    if (!pkixTrace) pkixTrace = (async () => {
+      const res = await fetch('pkix-compile.json');
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const chunks = [];
+      let got = 0;
+      if (res.body && res.body.getReader) {
+        const reader = res.body.getReader();
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          chunks.push(value);
+          got += value.length;
+          traceNote.textContent = 'loading PKIX: ' + (got / 1048576).toFixed(1) + ' MB';
+        }
+      } else {
+        chunks.push(new Uint8Array(await res.arrayBuffer()));
+      }
+      const bytes = new Uint8Array(chunks.reduce((n, c) => n + c.length, 0));
+      let at = 0;
+      for (const c of chunks) { bytes.set(c, at); at += c.length; }
+      (Module.FS || FS).writeFile('/datasets/pkix/compile.json', bytes);
+    })().catch((e) => { pkixTrace = null; throw e; });
+    return pkixTrace;
+  }
+  // The demo's comparison trace (-no-gen-OER), fetched the first time
+  // Compare is pressed (or C), then compare mode is asked for again.
+  let compareTrace = null;
+  function loadCompareTrace() {
+    if (!compareTrace) compareTrace = fetch('demo-compile-no-gen-OER.json').then((res) => {
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      return res.arrayBuffer();
+    }).then((buf) => {
+      (Module.FS || FS).writeFile('/datasets/demo/compile-no-gen-OER.json', new Uint8Array(buf));
+    }).catch((e) => { compareTrace = null; throw e; });
+    return compareTrace;
+  }
+  function compareWanted() {
+    traceNote.textContent = 'loading the comparison...';
+    loadCompareTrace().then(() => {
+      traceNote.textContent = '';
+      if (api && wanted === 5) { api.compare(); refresh(); }
+    }, (e) => { traceNote.textContent = 'the comparison did not load (' + e.message + ')'; });
+  }
+  let wanted = -1;  // the last choice: a slow fetch must not override a later one
   function choose(i, remember = true) {
-    if (!api || !api.open(i)) return;
-    document.querySelectorAll('[data-set]').forEach(b => b.setAttribute('aria-pressed', String(Number(b.dataset.set) === i)));
+    if (!api) return;
+    wanted = i;
+    if (i === PKIX_TRACE) {
+      traceNote.textContent = 'loading PKIX...';
+      loadPkixTrace().then(() => {
+        traceNote.textContent = '';
+        if (wanted === i) openSet(i, remember);
+      }, (e) => {
+        traceNote.textContent = 'PKIX did not load (' + e.message + ')';
+      });
+      return;
+    }
+    openSet(i, remember);
+  }
+  function openSet(i, remember) {
+    if (!api.open(i)) return;
+    document.querySelectorAll('[data-set]').forEach(b => b.setAttribute('aria-pressed', String(Number(b.dataset.set) === i || (i === PKIX_TRACE && b.dataset.set === '5'))));
+    document.querySelectorAll('[data-trace]').forEach(b => b.setAttribute('aria-pressed', String(Number(b.dataset.trace) === i)));
     document.body.classList.remove('strips', 'city', 'compile');
     document.body.classList.add(kinds[i]);
     if (remember) try { localStorage.setItem('asn1viz.dataset', String(i)); } catch (e) {}
@@ -159,6 +233,8 @@
     const comparing = !!(s.compare && s.compare.on);
     document.body.classList.toggle('comparing', comparing);
     document.getElementById('compare').setAttribute('aria-pressed', String(comparing));
+    // Only the demo has a comparison in the page (PKIX's is for the desktop).
+    document.getElementById('compare').hidden = !(s.compare && s.compare.available);
     const key = JSON.stringify(s.panel);
     if (key !== lastSheet) {
       lastSheet = key;
@@ -180,6 +256,7 @@
       loading.textContent = 'This browser could not start WebGL 2: ' + why;
       StrataLoader.fallback('engine', 'This browser could not start WebGL 2: ' + why);
     },
+    onCompareWanted: () => compareWanted(),
     onViewerReady: () => {
       api = {
         open: Module.cwrap('asn1viz_open', 'number', ['number']),
@@ -215,6 +292,7 @@
     },
   };
   document.querySelectorAll('[data-set]').forEach(b => b.addEventListener('click', () => choose(Number(b.dataset.set))));
+  document.querySelectorAll('[data-trace]').forEach(b => b.addEventListener('click', () => choose(Number(b.dataset.trace))));
   document.querySelectorAll('[data-key]').forEach(b => b.addEventListener('click', () => {
     if (api) api.key(Number(b.dataset.key));
     canvas.focus();

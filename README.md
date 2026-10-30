@@ -19,7 +19,7 @@
   floors of generated C, one band per compiler function that wrote it.
 
 RFCs 0023 and 0024 are implemented through their browser phases, and RFC 0034
-through its trace (K0) and scene (K1); see
+through its trace (K0), scene (K1) and browser datasets (K3); see
 [Status and follow-ups](#status-and-follow-ups). **Try it in a browser:**
 <https://asn1-viz.play.danielstephenson.dev>.
 
@@ -179,6 +179,7 @@ example (readers may ignore them):
 | `fix.diffs` | | only the assignments the fixer changed; hunks with `@@ -a,b +c,d @@` headers and two lines of context |
 | `compile` | `result`, `totals`, `byFn` | `asn1_compile`'s return value; files, lines, annotated lines, attributed files, distinct `source:line`s; lines per function over all files |
 | `compile.files[]` | `bytes`, `bySrc` | file size without the origin comments; lines per compiler `source:line` |
+| `compile` | `sources` | each compiler `source:line` seen, and the function it is in (so a band's origins are its function's `bySrc` lines) |
 | `save` | `status`, `generated` | the helper files the compiler wrote (`pdu_collection.c`, `Makefile.am.*`, ...), with bytes and lines |
 
 `compile.functions` is ordered busiest first. The events in asn1c's standard
@@ -229,7 +230,9 @@ section 2). A scrubber along the bottom spans the four stages:
   compiler function that emitted lines into its files
   (`-debug-output-origin-lines`), each band as tall as its line count, grey at
   the bottom for unannotated lines. Files no one type owns stand on their own
-  plot beside the city. Click a band for the function and its line count.
+  plot beside the city. Click a band for the function, its line count, and
+  its top five origins: the compiler source lines in that function that wrote
+  the most of them (`asn1c_C.c:4475  3 lines`).
 - **Save.** The skeletons `asn1c` copies rather than generates fill a
   "library" at the city's edge, one block per file, sized by its bytes.
 
@@ -249,8 +252,45 @@ rebuilt as the playhead moves.
 | PKIX at fixer event 2,774 of 7,835: the newest visits pulse in their pass family's colour. | After the run: 254 files, 26,292 lines from 27 functions (`emit_member_table` 4,783 lines), and 311 skeletons copied. |
 
 The traces are `asn1-viz-compile-trace`'s (above): `datasets/demo/compile.json`
-is the one the browser page plays, and `datasets/pkix/compile.json` is the
-one in the pictures (`./build/asn1-viz datasets/pkix/compile.json`).
+is the one the browser page opens with, and `datasets/pkix/compile.json` is
+the one in the pictures (`./build/asn1-viz datasets/pkix/compile.json`), also
+in the page behind **PKIX**.
+
+### The pipeline
+
+The legend for the view: the stages one `asn1c` run goes through (function
+names as at the pinned fork, [`asn1c.ref`](asn1c.ref)), and what each one
+puts into `asn1-compile/1`.
+
+```mermaid
+flowchart LR
+  subgraph parse ["Parse"]
+    P["asn1p_parse_file<br/>(each input)"]
+  end
+  subgraph fix ["Fix: asn1f_process"]
+    I["importStandardModules<br/>(skeletons/standard-modules)"]
+    F1["phase 1: asn1f_fix_module__phase_1<br/>phase_1_1 per assignment<br/>(asn1f_fix_dereference_types,<br/>asn1f_fix_constr_tag,<br/>asn1f_resolve_constraints, ...);<br/>then asn1f_fix_constr_autotag,<br/>asn1f_fix_bit_string, asn1f_fix_cstring"]
+    F2["phase 2: asn1f_fix_module__phase_2<br/>asn1f_fix_dereference_defaults,<br/>asn1f_resolve_constraints,<br/>asn1f_check_constraints"]
+    I --> F1 --> F2
+  end
+  subgraph compile ["Compile: asn1_compile"]
+    C["asn1c_compile_expr<br/>per assignment; each line's<br/>origin comment names its<br/>emitter (asn1c_C.c:4166<br/>emit_member_table)"]
+  end
+  subgraph save ["Save"]
+    S["asn1c_save_compiled_output<br/>Type.c / Type.h, plus the<br/>skeletons (asn1c_copy_over)"]
+  end
+  P --> I
+  F2 --> C --> S
+  P -. "parse[]: assignments in source order" .-> T[("asn1-compile/1")]
+  F2 -. "fix.events[] (A1F_DEBUG lines),<br/>fix.diffs (-E against -E -F)" .-> T
+  C -. "compile.files[]: byFn, bySrc;<br/>compile.sources" .-> T
+  S -. "save.skeletons[], save.generated[]" .-> T
+```
+
+In the view, Parse raises the buildings, Fix pulses them event by event (both
+phases, in the order `asn1f_process` logs them) and marks the ones whose
+printed form changed, Compile stacks one floor per emitter, and Save fills
+the skeleton library.
 
 ### Compare mode
 
@@ -316,14 +356,23 @@ source /path/to/emsdk/emsdk_env.sh
 emcmake cmake -S . -B build-web -DCMAKE_BUILD_TYPE=Release -DASN1VIZ_WITH_STRATA=OFF -DASN1VIZ_WEB=ON
 cmake --build build-web -j8
 ctest --test-dir build-web                      # the model tests, as wasm under Node
-# serve build-web/asn1-viz.html (+ .js, .wasm, bench.js) as index.html; ?set=0..5 picks the dataset
+# serve build-web/asn1-viz.html (+ .js, .wasm, bench.js, pkix-compile.json, demo-compile-no-gen-OER.json) as index.html; ?set=0..6 picks the dataset (6: the PKIX replay)
 ```
 
 Six datasets sit behind the buttons: the certificate's bits, the canonical
 check, every PER element (the demo message), the PKIX city, the recursion
-city and the compilation replay of the demo module, with play, step and
-stage buttons and a range for the scrubber (the canvas's own scrubber takes
-a tap too). Drag to orbit, right-drag or two fingers to pan, wheel or the +/-
+city and the compilation replay, with play, step and stage buttons and a
+range for the scrubber (the canvas's own scrubber takes a tap too). The
+replay opens on the demo module; **PKIX** switches it to the PKIX modules.
+Their trace (1.4 MB, 86 KB gzipped) is not built into the page: it is
+served beside it as `pkix-compile.json` and fetched the first time PKIX is
+chosen. The demo's comparison trace (`-no-gen-OER`, 92 KB) is fetched the
+same way, as `demo-compile-no-gen-OER.json`, the first time Compare is
+pressed. That keeps the first download (`.wasm`, `.js`, page and `bench.js`)
+at 1.75 MB, 0.51 MB gzipped as the arcade serves it, rather than 3.25 MB
+(0.60 MB) with both traces built in.
+
+Drag to orbit, right-drag or two fingers to pan, wheel or the +/-
 buttons to zoom, and click or tap to pick. On a narrow screen the pick panel
 moves from the canvas into a sheet under it, and the canvas draws at most two
 pixels per CSS pixel. CI builds the page, runs the tests under Node, and
@@ -332,7 +381,10 @@ phone at device pixel ratio 2. Every dataset must open and draw, a real click
 or tap must change the selection, and a click or tap on a block must pick the
 same block as the page's own pick call at that point (device pixel ratios 1, 2
 and 3). The compilation replay must play, pause, step a stage, and seek from
-the range and from a click or tap on the canvas's scrubber.
+the range and from a click or tap on the canvas's scrubber. Neither fetched
+trace may be fetched before it is wanted, nor more than once; the PKIX
+replay must play, and the frame rate of each stage is logged (it fails under 2 frames a
+second; headless Chromium draws on the CPU, so the numbers are a floor).
 
 To measure the frame rate on a real device, open the page with `?bench`
 (<https://asn1-viz.play.danielstephenson.dev/?bench>). It flies one fixed
@@ -360,7 +412,7 @@ losing the live view (not in automated browsers or `?bench` runs).
 loader: emcc's script tag sits inert in `<template id="strata-glue">`, the
 bridge starts it, and the engine waits in `Module.instantiateWasm` for the
 loader's bytes. After each link, `web/strata_page.cmake` puts the loader and
-the bridge inline in the page (so the site is still the same four files) and stamps the download's size on the
+the bridge inline in the page (so the shell adds no files to the site) and stamps the download's size on the
 template, because the arcade compresses on the fly and sends no
 `Content-Length`.
 
@@ -462,9 +514,9 @@ Local checkouts replace either download:
 | 0024 C2: districts, buildings, references, recursion | done (#5) |
 | 0024 C3: cross-link with the strips | `file:line` in the strip view's pick panel (#5) |
 | 0034 K0: `asn1-viz-compile-trace`, `asn1-compile/1`, golden tests, `codeBytes` | done (#13) |
-| 0034 K1: scene: stage scrubber, pulses, diff marks, floors, skeleton library, picking (native and browser) | done |
+| 0034 K1: scene: stage scrubber, pulses, diff marks, floors, skeleton library, picking (native and browser) | done (#14) |
 | 0034 K2: compare mode (G4): `--flag` in the trace tool, flag-set pairs for the demo and PKIX, `--compare`, **C**, the page's Compare button | done; checked with flag sets at one pin (a second `asn1c.ref` in CI is out of scope) |
-| 0034 K3: browser datasets (PKIX), README pipeline diagram | the demo trace is in the page; PKIX is not yet |
+| 0034 K3: browser datasets (PKIX), README pipeline diagram | done: PKIX fetched on demand, pick panel origins, [the pipeline](#the-pipeline) |
 
 Follow-ups, not done here:
 

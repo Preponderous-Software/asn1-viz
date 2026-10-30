@@ -453,6 +453,17 @@ void CompileView::draw(Overlay& o, const CameraMatrices& cam, int w, int h) {
            "space play  [ ] stage  , . step  L lookups  drag the bar to scrub  click pick  F focus  H home", kDim);
 }
 
+// A picked band's top origins (RFC 0034 section 3): the compiler source
+// lines in its function that wrote the most of its lines.
+template <class Line>
+static void originLines(const CompileTrace& tr, const std::vector<int>& files, const std::string& fn, Line& line) {
+    if (fn.empty() || tr.sources.empty()) return;
+    const auto top = tr.originsOf(files, fn, 5);
+    if (top.empty()) return;
+    line("top origins in asn1c (source:line):", kDim, 8);
+    for (const auto& [src, n] : top) line("  " + src + "  " + commas(n) + (n == 1 ? " line" : " lines"), kDim, 8);
+}
+
 std::vector<PanelLine> CompileView::panel(size_t fit) const {
     std::vector<PanelLine> out;
     auto line = [&](std::string t, const float* c, float size = 16) {
@@ -576,6 +587,10 @@ std::vector<PanelLine> CompileView::panel(size_t fit) const {
             float c[4];
             rgba(functionColor(fn, static_cast<int>(city_.functions().size())), c);
             line(fnName(fn) + ": " + commas(nfn) + " of " + commas(total) + " lines", c, 8);
+            std::vector<int> files;
+            for (int i : tr.filesOf(t))
+                if (i < r.filesDone()) files.push_back(i);
+            originLines(tr, files, fn >= 0 ? fnName(fn) : std::string(), line);
         } else if (total > 0) {
             std::vector<int> idx;
             for (size_t i = 0; i < lines.size(); ++i)
@@ -594,6 +609,8 @@ std::vector<PanelLine> CompileView::panel(size_t fit) const {
                             : f.byFn.end();
         const int nfn = it != f.byFn.end() ? it->second : f.unannotated;
         line("generated, no one type: " + commas(f.lines) + " lines; " + fnName(selected_.fn) + " " + commas(nfn), kDim, 8);
+        if (selected_.fn < static_cast<int>(city_.functions().size()))
+            originLines(tr, {selected_.file}, fnName(selected_.fn), line);
     } else if (selected_.kind == CompilePick::Skeleton) {
         const CompileCopied& k = tr.skeletons[static_cast<size_t>(selected_.skeleton)];
         line(k.path, kGold);
