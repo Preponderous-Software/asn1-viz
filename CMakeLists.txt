@@ -226,6 +226,7 @@ if(ASN1VIZ_WITH_ASN1C)
     # as the encoder side does, and the strict canonical check accepts it.
     set(PKIX_IMPORTED_LAYOUT "${ASN1VIZ_DATASETS_OUT}/pkix/imported-sample.layout.json")
     add_custom_command(OUTPUT "${PKIX_IMPORTED_LAYOUT}"
+      COMMAND ${CMAKE_COMMAND} -E make_directory "${ASN1VIZ_DATASETS_OUT}/pkix"
       COMMAND asn1-viz-extract-pkix --value "${PKIX_SAMPLES}/sample-Certificate-1.der" --value-codec der --codecs uper
               --import "${PKIX_SAMPLES}/sample-Certificate-1.per" --canonical --out "${PKIX_IMPORTED_LAYOUT}"
       DEPENDS asn1-viz-extract-pkix)
