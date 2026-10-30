@@ -148,7 +148,8 @@ A stage that fails is recorded as `"failed"` (and the later ones as
 `"skipped"`), and the trace is still written. With `--schema-out` the tool
 also writes the `asn1-schema/1` walk of the same tree (the ids the trace
 uses), with `codeBytes` filled: the bytes of each assignment's generated
-`.c` and `.h`. The PKIX and demo `schema.json` files come from it.
+`.c` and `.h`, not counting the origin comments (which carry asn1c's build
+path), so the size asn1c writes without `-debug-output-origin-lines`. The PKIX and demo `schema.json` files come from it.
 
 The format is RFC 0034 section 2's. Type ids are those of the `schema` file;
 `type` is `null` where nothing is attributed. Fields beyond the RFC's
@@ -164,7 +165,7 @@ example (readers may ignore them):
 | `fix.events[]` | `how` | the rule that attributed it: `processing` (a `=== Now processing "X"` marker), `line` (the assignment holding the line the message names), `name` (the assignment the message names), `current` (the last assignment attributed in the same schema file) or `none` |
 | `fix.diffs` | | only the assignments the fixer changed; hunks with `@@ -a,b +c,d @@` headers and two lines of context |
 | `compile` | `result`, `totals`, `byFn` | `asn1_compile`'s return value; files, lines, annotated lines, attributed files, distinct `source:line`s; lines per function over all files |
-| `compile.files[]` | `bytes`, `bySrc` | file size; lines per compiler `source:line` |
+| `compile.files[]` | `bytes`, `bySrc` | file size without the origin comments; lines per compiler `source:line` |
 | `save` | `status`, `generated` | the helper files the compiler wrote (`pdu_collection.c`, `Makefile.am.*`, ...), with bytes and lines |
 
 `compile.functions` is ordered busiest first. The events in asn1c's standard

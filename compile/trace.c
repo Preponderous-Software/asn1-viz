@@ -25,7 +25,13 @@
  *
  * With --schema-out it also writes the asn1-schema/1 walk of the same tree
  * (schema/schema_walk.c, the ids the trace uses) with codeBytes filled: the
- * bytes of each assignment's generated .c and .h.
+ * bytes of each assignment's generated .c and .h without the origin
+ * comments.
+ *
+ * Nothing in the output depends on where the build tree is: the inputs and
+ * asn1c's standard modules are copied into the work directory and parsed by
+ * relative paths (asn1c writes the module path into the code), and the
+ * origin comments (which hold asn1c's __FILE__) are not counted in sizes.
  *
  * The fixer's debug text is not an API; it is parsed as it is at the pinned
  * asn1c.ref, and the golden tests (tests/test_compile.cpp) fail on a pin
@@ -590,11 +596,13 @@ typedef struct {
     char group; /* 'c'ompiled, 's'keleton, 'g'enerated */
 } gfile_t;
 
-/* "\t// asn1c_C.c:4166 emit_member_table()" at the end of a line. */
-static int origin_of(const char *line, char *src, size_t srcsz, char *fn, size_t fnsz) {
+/* "\t// asn1c_C.c:4166 emit_member_table()" at the end of a line: its
+ * length, or 0. */
+static size_t origin_of(const char *line, char *src, size_t srcsz, char *fn, size_t fnsz) {
     const char *o = NULL;
     for(const char *q = strstr(line, "\t// "); q; q = strstr(q + 1, "\t// ")) o = q;
     if(!o) return 0;
+    const size_t comment = strlen(o);
     o += 4;
     const char *colon = strchr(o, ':');
     const char *sp = colon ? strchr(colon, ' ') : NULL;
@@ -612,7 +620,7 @@ static int origin_of(const char *line, char *src, size_t srcsz, char *fn, size_t
         if(*q == '/') file = q + 1; /* __FILE__ is a build path */
     snprintf(src, srcsz, "%.*s:%d", (int)(colon - file), file, atoi(colon + 1));
     snprintf(fn, fnsz, "%.*s", (int)(paren - sp - 1), sp + 1);
-    return 1;
+    return comment;
 }
 
 static void scan_file(gfile_t *f, const char *text, size_t len) {
@@ -624,7 +632,11 @@ static void scan_file(gfile_t *f, const char *text, size_t len) {
         size_t l = nl ? (size_t)(nl - s) : (size_t)(end - s);
         snprintf(line, sizeof line, "%.*s", (int)(l < sizeof line ? l : sizeof line - 1), s);
         f->lines++;
-        if(origin_of(line, src, sizeof src, fn, sizeof fn)) {
+        size_t comment = origin_of(line, src, sizeof src, fn, sizeof fn);
+        if(comment) {
+            /* The comment holds asn1c's __FILE__, a build path: the size
+             * kept is the code's, as asn1c writes it without the comments. */
+            f->bytes -= (long)comment;
             histo_add(&f->by_fn, fn, 1);
             histo_add(&f->by_src, src, 1);
         } else {
