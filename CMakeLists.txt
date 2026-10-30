@@ -228,9 +228,10 @@ if(ASN1VIZ_WITH_ASN1C)
         if(_ds STREQUAL "pkix" AND _f STREQUAL "schema")
           continue()  # pkix_schema_up_to_date above
         endif()
+        # diff -u, so a failure shows which counts moved.
         add_test(NAME ${_ds}_${_f}_up_to_date
-                 COMMAND ${CMAKE_COMMAND} -E compare_files "${ASN1VIZ_DATASETS_OUT}/${_ds}/${_f}.json"
-                         "${CMAKE_CURRENT_SOURCE_DIR}/datasets/${_ds}/${_f}.json")
+                 COMMAND diff -u "${CMAKE_CURRENT_SOURCE_DIR}/datasets/${_ds}/${_f}.json"
+                         "${ASN1VIZ_DATASETS_OUT}/${_ds}/${_f}.json")
       endforeach()
     endforeach()
     # The golden counts, measured on the freshly generated traces.
