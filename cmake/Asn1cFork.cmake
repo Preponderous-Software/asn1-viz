@@ -15,8 +15,10 @@
 #   ASN1C_BUILD_DIR    its build tree (config.h, lib*/.libs/*.a, asn1c/asn1c)
 #   ASN1C_EXECUTABLE   the asn1c compiler
 #   asn1c::parser      imported static libraries: libasn1parser, libasn1fix,
-#   asn1c::fix         libasn1common, with the fork's config.h force-included
-#   asn1c::common      (the parser's struct layouts depend on it)
+#   asn1c::fix         libasn1common, libasn1print and libasn1compiler, with
+#   asn1c::common      the fork's config.h force-included (the parser's struct
+#   asn1c::print       layouts depend on it)
+#   asn1c::compiler
 #
 # A local checkout is used instead of a download with
 # -DFETCHCONTENT_SOURCE_DIR_ASN1C=<path>. That checkout must not have been
@@ -84,7 +86,7 @@ if(NOT _asn1c_built STREQUAL ASN1VIZ_ASN1C_REF OR NOT EXISTS "${ASN1C_EXECUTABLE
 endif()
 message(STATUS "asn1c fork ${ASN1VIZ_ASN1C_REF}: ${ASN1C_EXECUTABLE}")
 
-foreach(_lib common parser fix)
+foreach(_lib common parser fix print compiler)
   add_library(asn1c::${_lib} STATIC IMPORTED GLOBAL)
   set_target_properties(asn1c::${_lib} PROPERTIES
     IMPORTED_LOCATION "${ASN1C_BUILD_DIR}/libasn1${_lib}/.libs/libasn1${_lib}.a")
@@ -95,6 +97,10 @@ endforeach()
 # libasn1fix needs the parser, and both need the common helpers.
 set_property(TARGET asn1c::fix APPEND PROPERTY INTERFACE_LINK_LIBRARIES asn1c::parser asn1c::common)
 set_property(TARGET asn1c::parser APPEND PROPERTY INTERFACE_LINK_LIBRARIES asn1c::common)
+set_property(TARGET asn1c::print APPEND PROPERTY INTERFACE_LINK_LIBRARIES asn1c::parser asn1c::common)
+# The code generator (asn1_compile) needs the fixer's lookups and the printer.
+set_property(TARGET asn1c::compiler APPEND PROPERTY INTERFACE_LINK_LIBRARIES asn1c::fix asn1c::print asn1c::parser
+                                                                             asn1c::common)
 
 # asn1viz_generate(<name> PDU <Type> SCHEMAS <file>... [FLAGS <flag>...])
 #

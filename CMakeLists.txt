@@ -55,6 +55,7 @@ add_library(asn1viz_model STATIC
   src/model/json.cpp
   src/model/layout.cpp
   src/model/schema.cpp
+  src/model/compile.cpp
   src/scene/camera.cpp
   src/scene/mesh.cpp
   src/scene/strip.cpp
@@ -64,7 +65,7 @@ asn1viz_warnings(asn1viz_model)
 
 if(ASN1VIZ_BUILD_TESTS)
   enable_testing()
-  foreach(t json mesh camera layout strip schema city)
+  foreach(t json mesh camera layout strip schema city compile)
     add_executable(test_${t} tests/test_${t}.cpp)
     target_link_libraries(test_${t} PRIVATE asn1viz_model)
     target_include_directories(test_${t} PRIVATE tests)
@@ -129,15 +130,36 @@ if(ASN1VIZ_WITH_ASN1C)
     COMMENT "Laying out the non-canonical certificate against the canonical one")
 
   # The schema walker (RFC 0024 C1): asn1c's own parser and fixer, walked.
-  add_executable(asn1-viz-schema schema/walk.c)
+  add_executable(asn1-viz-schema schema/walk.c schema/schema_walk.c)
   target_link_libraries(asn1-viz-schema PRIVATE asn1c::fix asn1c::parser asn1c::common)
   target_compile_definitions(asn1-viz-schema PRIVATE ASN1VIZ_ASN1C_COMMIT="${ASN1VIZ_ASN1C_REF}")
+
+  # The compilation trace (RFC 0034 K0): one asn1c run, stage by stage, as
+  # asn1-compile/1, plus the same walk as asn1-schema/1 with codeBytes filled.
+  # The PKIX and demo schema.json files come from this tool.
+  add_executable(asn1-viz-compile-trace compile/trace.c schema/schema_walk.c)
+  target_include_directories(asn1-viz-compile-trace PRIVATE schema)
+  target_link_libraries(asn1-viz-compile-trace PRIVATE asn1c::compiler asn1c::fix asn1c::print asn1c::parser
+                                                       asn1c::common)
+  target_compile_definitions(asn1-viz-compile-trace PRIVATE ASN1VIZ_ASN1C_COMMIT="${ASN1VIZ_ASN1C_REF}"
+                                                            _DEFAULT_SOURCE _GNU_SOURCE)
+  asn1viz_warnings(asn1-viz-compile-trace)
   set(PKIX_SCHEMA "${ASN1VIZ_DATASETS_OUT}/pkix/schema.json")
-  add_custom_command(OUTPUT "${PKIX_SCHEMA}"
+  set(PKIX_COMPILE "${ASN1VIZ_DATASETS_OUT}/pkix/compile.json")
+  add_custom_command(OUTPUT "${PKIX_COMPILE}" "${PKIX_SCHEMA}"
     COMMAND ${CMAKE_COMMAND} -E make_directory "${ASN1VIZ_DATASETS_OUT}/pkix"
-    COMMAND asn1-viz-schema --out "${PKIX_SCHEMA}" ${PKIX_MODULES}
-    DEPENDS asn1-viz-schema
-    COMMENT "Walking the PKIX modules")
+    COMMAND asn1-viz-compile-trace -S "${ASN1C_SOURCE_DIR}/skeletons" --out "${PKIX_COMPILE}"
+            --schema-out "${PKIX_SCHEMA}" ${PKIX_MODULES}
+    DEPENDS asn1-viz-compile-trace
+    COMMENT "Tracing asn1c over the PKIX modules")
+  set(DEMO_SCHEMA "${ASN1VIZ_DATASETS_OUT}/demo/schema.json")
+  set(DEMO_COMPILE "${ASN1VIZ_DATASETS_OUT}/demo/compile.json")
+  add_custom_command(OUTPUT "${DEMO_COMPILE}" "${DEMO_SCHEMA}"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${ASN1VIZ_DATASETS_OUT}/demo"
+    COMMAND asn1-viz-compile-trace -S "${ASN1C_SOURCE_DIR}/skeletons" --out "${DEMO_COMPILE}"
+            --schema-out "${DEMO_SCHEMA}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/demo.asn1"
+    DEPENDS asn1-viz-compile-trace tests/fixtures/demo.asn1
+    COMMENT "Tracing asn1c over the demo module")
   # The recursion demo (RFC 0024 OQ3): the fork's richest circular test schema.
   set(ASN1C_COMPILER_TESTS "${ASN1C_SOURCE_DIR}/tests/tests-asn1c-compiler")
   set(RECURSION_SCHEMA "${ASN1VIZ_DATASETS_OUT}/recursion/schema.json")
@@ -148,13 +170,17 @@ if(ASN1VIZ_WITH_ASN1C)
     COMMENT "Walking 92-circular-loops-OK.asn1")
 
   add_custom_target(datasets ALL DEPENDS "${DEMO_LAYOUT}" "${PKIX_LAYOUT}" "${PKIX_CANONICAL_LAYOUT}"
-                                          "${PKIX_SCHEMA}" "${RECURSION_SCHEMA}")
+                                          "${PKIX_SCHEMA}" "${RECURSION_SCHEMA}"
+                                          "${PKIX_COMPILE}" "${DEMO_COMPILE}" "${DEMO_SCHEMA}")
   # Copies the regenerated, redistributable datasets into datasets/ (commit them).
   add_custom_target(update-datasets
     COMMAND ${CMAKE_COMMAND} -E copy "${PKIX_LAYOUT}" "${CMAKE_CURRENT_SOURCE_DIR}/datasets/pkix/certificate.layout.json"
     COMMAND ${CMAKE_COMMAND} -E copy "${DEMO_LAYOUT}" "${CMAKE_CURRENT_SOURCE_DIR}/datasets/demo/msg.layout.json"
     COMMAND ${CMAKE_COMMAND} -E copy "${PKIX_CANONICAL_LAYOUT}" "${CMAKE_CURRENT_SOURCE_DIR}/datasets/pkix/certificate-canonical.layout.json"
     COMMAND ${CMAKE_COMMAND} -E copy "${PKIX_SCHEMA}" "${CMAKE_CURRENT_SOURCE_DIR}/datasets/pkix/schema.json"
+    COMMAND ${CMAKE_COMMAND} -E copy "${PKIX_COMPILE}" "${CMAKE_CURRENT_SOURCE_DIR}/datasets/pkix/compile.json"
+    COMMAND ${CMAKE_COMMAND} -E copy "${DEMO_SCHEMA}" "${CMAKE_CURRENT_SOURCE_DIR}/datasets/demo/schema.json"
+    COMMAND ${CMAKE_COMMAND} -E copy "${DEMO_COMPILE}" "${CMAKE_CURRENT_SOURCE_DIR}/datasets/demo/compile.json"
     COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_SOURCE_DIR}/datasets/recursion"
     COMMAND ${CMAKE_COMMAND} -E copy "${RECURSION_SCHEMA}" "${CMAKE_CURRENT_SOURCE_DIR}/datasets/recursion/schema.json"
     DEPENDS datasets)
@@ -193,6 +219,23 @@ if(ASN1VIZ_WITH_ASN1C)
                      "${CMAKE_CURRENT_SOURCE_DIR}/datasets/pkix/certificate-canonical.layout.json")
     add_test(NAME pkix_schema_up_to_date
              COMMAND ${CMAKE_COMMAND} -E compare_files "${PKIX_SCHEMA}" "${CMAKE_CURRENT_SOURCE_DIR}/datasets/pkix/schema.json")
+    # The committed compilation traces (and their schema walks) are what the
+    # pinned fork produces today: an asn1c.ref bump that changes the fixer's
+    # debug text, the printer or the code generator fails here, and the
+    # golden counts in test_compile say what changed.
+    foreach(_ds pkix demo)
+      foreach(_f compile schema)
+        if(_ds STREQUAL "pkix" AND _f STREQUAL "schema")
+          continue()  # pkix_schema_up_to_date above
+        endif()
+        # diff -u, so a failure shows which counts moved.
+        add_test(NAME ${_ds}_${_f}_up_to_date
+                 COMMAND diff -u "${CMAKE_CURRENT_SOURCE_DIR}/datasets/${_ds}/${_f}.json"
+                         "${ASN1VIZ_DATASETS_OUT}/${_ds}/${_f}.json")
+      endforeach()
+    endforeach()
+    # The golden counts, measured on the freshly generated traces.
+    add_test(NAME compile_golden_generated COMMAND test_compile "${CMAKE_BINARY_DIR}")
     add_test(NAME recursion_schema_up_to_date
              COMMAND ${CMAKE_COMMAND} -E compare_files "${RECURSION_SCHEMA}"
                      "${CMAKE_CURRENT_SOURCE_DIR}/datasets/recursion/schema.json")

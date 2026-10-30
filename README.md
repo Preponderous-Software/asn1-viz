@@ -13,8 +13,12 @@
 - **Schema city** ([RFC 0024](https://github.com/Preponderous-Software/rfcs/blob/main/rfcs/rfc_0024_asn1c_schema_city.md)): an ASN.1 specification as a city, one district
   per module and one building per type, with references and recursion drawn
   as lines.
+- **Compilation trace** ([RFC 0034](https://github.com/Preponderous-Software/rfcs/blob/main/rfcs/rfc_0034_asn1c_compilation_view.md)):
+  one asn1c run recorded stage by stage (parse, fix, compile, save), for a
+  view that replays it over the schema city. The trace (K0) is done; the
+  scene is in progress. See [The compile trace](#the-compile-trace).
 
-Both RFCs are implemented through their browser phases; see
+RFCs 0023 and 0024 are implemented through their browser phases; see
 [Status and follow-ups](#status-and-follow-ups). **Try it in a browser:**
 <https://asn1-viz.play.danielstephenson.dev>.
 
@@ -117,6 +121,74 @@ does), and finds recursion with Tarjan's SCCs. It writes `asn1-schema/1`
 JSON. When a layout is opened, a `schema.json` beside it fills in the strip
 view's `file:line`.
 
+## The compile trace
+
+```sh
+./build/asn1-viz-compile-trace -S <asn1c>/skeletons --out compile.json --schema-out schema.json demo.asn1
+```
+
+`asn1-viz-compile-trace` (RFC 0034 K0, `compile/trace.c`) records one asn1c
+run as `asn1-compile/1` JSON, using asn1c's own libraries in-process, as the
+`asn1c` driver runs them:
+
+- **parse**: `asn1p_parse_file`; every assignment in parse order.
+- **fix**: the tree printed (`libasn1print`, the `-E` form); the standard
+  modules imported; `asn1f_process` with `A1F_DEBUG` and a logger that turns
+  each debug line into an event (reporting function, schema line, asn1c
+  `source:line`); the tree printed again (`-E -F`), with a unified diff per
+  assignment the fixer changed.
+- **compile**: `asn1_compile` with asn1c's default flags plus
+  `-debug-output-origin-lines`, into a temporary directory that is deleted
+  afterwards. Each generated file is counted per emitting compiler function
+  (the `// asn1c_C.c:4166 emit_member_table()` origin comments) and tied to
+  its assignment by asn1c's own file naming (`asn1c_make_identifier`).
+- **save**: the skeleton files the compiler copied, with their sizes.
+
+A stage that fails is recorded as `"failed"` (and the later ones as
+`"skipped"`), and the trace is still written. With `--schema-out` the tool
+also writes the `asn1-schema/1` walk of the same tree (the ids the trace
+uses), with `codeBytes` filled: the bytes of each assignment's generated
+`.c` and `.h`, not counting the origin comments (which carry asn1c's build
+path), so the size asn1c writes without `-debug-output-origin-lines`. The PKIX and demo `schema.json` files come from it.
+
+The format is RFC 0034 section 2's. Type ids are those of the `schema` file;
+`type` is `null` where nothing is attributed. Fields beyond the RFC's
+example (readers may ignore them):
+
+| Where | Field | Meaning |
+|---|---|---|
+| top level | `inputs`, `parseStatus` | the schema files (basenames); `"ok"` or `"failed"` |
+| `fix` | `result`, `warnings`, `fatals` | `asn1f_process`'s return value and diagnostic counts |
+| `fix` | `printed` | lines of the whole `-E` / `-E -F` print, diff lines removed/added, assignments changed |
+| `fix` | `attribution` | how many events each rule attributed |
+| `fix.events[]` | `expr` | the identifier the message names, when it names one |
+| `fix.events[]` | `how` | the rule that attributed it: `processing` (a `=== Now processing "X"` marker), `line` (the assignment holding the line the message names), `name` (the assignment the message names), `current` (the last assignment attributed in the same schema file) or `none` |
+| `fix.diffs` | | only the assignments the fixer changed; hunks with `@@ -a,b +c,d @@` headers and two lines of context |
+| `compile` | `result`, `totals`, `byFn` | `asn1_compile`'s return value; files, lines, annotated lines, attributed files, distinct `source:line`s; lines per function over all files |
+| `compile.files[]` | `bytes`, `bySrc` | file size without the origin comments; lines per compiler `source:line` |
+| `save` | `status`, `generated` | the helper files the compiler wrote (`pdu_collection.c`, `Makefile.am.*`, ...), with bytes and lines |
+
+`compile.functions` is ordered busiest first. The events in asn1c's standard
+modules (`ASN1-Object-Identifier-Module`, `ASN1C-UsefulInformationObjectClasses`)
+and the files generated for their types (`EXTERNAL.c/.h`) are not in the
+schema, so they stay unattributed.
+
+What the pinned asn1c does (`tests/test_compile.cpp` asserts these; the fixer's
+debug text is not an API, so an `asn1c.ref` bump that changes it fails there):
+
+| | demo | PKIX |
+|---|---|---|
+| fixer events (unattributed) | 391 (251) | 7,835 (251) |
+| busiest reporters | `asn1constraint_resolve` 136, `asn1f_resolve_constraints` 88 | `asn1constraint_resolve` 2,225, `asn1f_resolve_constraints` 1,070 |
+| printed lines changed by the fixer | 7 of 19, in 2 assignments | 128 of 811, in 53 assignments |
+| generated files, lines (annotated) | 6, 1,093 (971) | 254, 26,292 (21,208) |
+| emitting functions, busiest | 23, `emit_member_table` 330 | 27, `emit_member_table` 4,783 |
+| skeletons copied | 311 | 311 |
+
+RFC 0034's Evidence was measured with a newer local asn1c build (7,812
+events, 24,489 lines, 26 functions, 268 skeletons); the fixer's busiest
+reporters and the PKIX print diff are the same at the pin.
+
 ## In a browser
 
 The same views on Strata's WebGL 2 backend (Emscripten), with the committed
@@ -218,6 +290,7 @@ python3 tools/layout_png.py cert.layout.json cert.png      # a flat 2D look (Pil
 | `demo` | `tests/fixtures/demo.asn1` (written for this repository) | `tests/fixtures/demo-msg.xer` | `datasets/demo/msg.layout.json` |
 | `pkix` (city) | as above | | `datasets/pkix/schema.json` |
 | `recursion` (city) | the fork's `tests/tests-asn1c-compiler/92-circular-loops-OK.asn1` | | `datasets/recursion/schema.json` |
+| `pkix`, `demo` (compile trace) | as above | | `datasets/{pkix,demo}/compile.json`, with `schema.json` beside each |
 
 The committed layouts are what the pinned fork produces: CI regenerates them
 and fails if they differ (`cmake --build build --target update-datasets`
@@ -275,6 +348,8 @@ Local checkouts replace either download:
 | 0024 C1: model from `libasn1parser`/`libasn1fix`, SCCs | done (#5) |
 | 0024 C2: districts, buildings, references, recursion | done (#5) |
 | 0024 C3: cross-link with the strips | `file:line` in the strip view's pick panel (#5) |
+| 0034 K0: `asn1-viz-compile-trace`, `asn1-compile/1`, golden tests, `codeBytes` | done |
+| 0034 K1–K3: scrubber scene, compare mode, browser | not started here (K1 in progress separately) |
 
 Follow-ups, not done here:
 
@@ -286,7 +361,8 @@ Follow-ups, not done here:
 - **Fork asks** (RFC 0023 F1/F2): an opt-in PER trace macro would make the
   inferred labels exact; the bit position in `-P` output. Not filed.
 - **Code-size building height** (RFC 0024 OQ2's alternative): `codeBytes`
-  is in `asn1-schema/1` as `null`.
+  is filled for PKIX and the demo (RFC 0034 K0), and still `null` for the
+  recursion dataset; the city does not use it yet.
 - **The extractor in the page** (RFC 0023 OQ8's second option), so a visitor
   can paste a value.
 - **APER import**, fragmented open types (16K octets or more), BER/DER and

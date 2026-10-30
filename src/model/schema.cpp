@@ -69,6 +69,7 @@ Schema loadSchema(const json::Value& doc) {
         ty.members = static_cast<int>(t.integer("members"));
         ty.line = static_cast<int>(t.integer("line"));
         ty.scc = static_cast<int>(t.integer("scc", -1));
+        ty.codeBytes = t.integer("codeBytes", -1);
         if (ty.id != static_cast<int>(s.types.size())) throw std::runtime_error("asn1-schema/1: type ids out of order");
         if (ty.module < 0 || ty.module >= static_cast<int>(s.modules.size()))
             throw std::runtime_error("asn1-schema/1: a type names no module");
