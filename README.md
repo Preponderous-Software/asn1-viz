@@ -126,6 +126,7 @@ view's `file:line`.
 
 ```sh
 ./build/asn1-viz-compile-trace -S <asn1c>/skeletons --out compile.json --schema-out schema.json demo.asn1
+./build/asn1-viz-compile-trace -S <asn1c>/skeletons --out no-oer.json --schema-name schema.json --flag -no-gen-OER demo.asn1
 ```
 
 `asn1-viz-compile-trace` (RFC 0034 K0, `compile/trace.c`) records one asn1c
@@ -144,6 +145,17 @@ run as `asn1-compile/1` JSON, using asn1c's own libraries in-process, as the
   (the `// asn1c_C.c:4166 emit_member_table()` origin comments) and tied to
   its assignment by asn1c's own file naming (`asn1c_make_identifier`).
 - **save**: the skeleton files the compiler copied, with their sizes.
+
+`--flag` (repeatable) passes one of asn1c's own code-generation flags on,
+mapped to the same compiler and fixer bits as `asn1c/asn1c.c` maps them at the
+pin: `-gen-X` / `-no-gen-X` for `OER`, `UPER`, `APER`, `BER`, `CER`, `XER`,
+`JER`, `CBOR`, `print`, `random-fill` and `example`, and the `-f` flags that
+only set bits (`-fcompound-names`, `-fwide-types`, `-fno-constraints`,
+`-fbless-SIZE`, `-fprefer-import-source`, `-fall-defs-global`,
+`-findirect-choice`, `-fline-refs`, `-fno-include-deps`, `-fincludes-quoted`,
+`-funnamed-unions`). They are recorded in the trace's `flags`, after
+`-debug-output-origin-lines`, so two traces of one schema can be compared
+(below).
 
 A stage that fails is recorded as `"failed"` (and the later ones as
 `"skipped"`), and the trace is still written. With `--schema-out` the tool
@@ -223,8 +235,8 @@ section 2). A scrubber along the bottom spans the four stages:
 
 **Space** plays and pauses, **[** and **]** step a stage, **,** and **.**
 step one event (or assignment, file, skeleton), and dragging or clicking the
-scrubber seeks; **H** goes home and **F** focuses the selection. **C** is
-kept for compare mode (G4, phase K2). Every building, band, shared file and
+scrubber seeks; **H** goes home and **F** focuses the selection. **C**
+switches to compare mode when a second trace is loaded (below). Every building, band, shared file and
 skeleton is pickable; the panel says what has happened to the picked type so
 far: its fixer events by family, its diff, and its generated lines by
 function. The scene stays within a handful of Strata meshes however big the
@@ -239,6 +251,52 @@ rebuilt as the playhead moves.
 The traces are `asn1-viz-compile-trace`'s (above): `datasets/demo/compile.json`
 is the one the browser page plays, and `datasets/pkix/compile.json` is the
 one in the pictures (`./build/asn1-viz datasets/pkix/compile.json`).
+
+### Compare mode
+
+![PKIX compiled with and without -fwide-types: BasicConstraints picked, its emit_type_DEF floor 65 lines in A and 27 in B](docs/media/pkix-compare.png)
+
+```sh
+./build/asn1-viz --compare datasets/pkix/compile.json datasets/pkix/compile-fwide-types.json
+./build/asn1-viz --compare datasets/demo/compile.json datasets/demo/compile-no-gen-OER.json --pick Msg/emit_member_OER_constraints
+```
+
+Two `asn1-compile/1` traces of the same schema (RFC 0034 G4), A and B, drawn
+as one city: two `asn1c.ref` pins, or one pin with two flag sets. B must have
+parsed the same assignments as A (`matches` on A's schema, and the same parse
+order), or it is refused. Each building is a stack of floors, one per emitting
+function (unannotated lines at the bottom), each as tall as the larger of its
+A and B line counts:
+
+- the lines both runs wrote, in a muted tint of the function's colour; a type
+  whose lines did not change at all is grey;
+- above them, the difference: **blue** for lines only B wrote (growth),
+  **orange** for lines only A wrote (shrinkage). Blue against orange differs
+  in hue and in lightness, so it reads without red against green, and stays
+  clear of the selection's gold and the fixer's pink;
+- a changed type's roof in the colour of its net change (pale when lines only
+  moved between functions), and a pink roof tile where the fixer treated the
+  type differently: its `-E` / `-E -F` diff, or the number of fixer events
+  naming it.
+
+Click a floor for the function and its A lines, B lines and delta; the panel
+sums up the pair: types changed, total lines A → B, fixer differences, files
+and skeletons copied. **C** goes back to A's replay (and again to the
+comparison), keeping the selection.
+
+The committed pairs are the pinned asn1c with one flag changed, so the
+difference is the flag's (`tests/test_compare.cpp` asserts these):
+
+| | A | B | What changes |
+|---|---|---|---|
+| demo | `compile.json` | `compile-no-gen-OER.json` | Both types lose their `emit_member_OER_constraints` lines (Msg 25, Item 16; 5 more in `EXTERNAL`): 1,093 → 1,047 lines, and 311 → 291 skeletons copied (the `*_oer.c/.h` support code). The fixer runs the same. |
+| PKIX | `compile.json` | `compile-fwide-types.json` (the flag the PKIX layouts are built with) | 9 of 126 types with code change, 26,292 → 26,172 lines. INTEGER becomes `INTEGER_t` instead of a native `long`: constrained INTEGERs (`SkipCerts`, `BaseDistance`, `CRLNumber`) drop their native-type code (`asn1c_lang_C_type_SIMPLE_TYPE` 34 → 27, `asn1c_lang_C_type_common_INTEGER` 5 → 0) and gain constraint checking (15 → 20); `BasicConstraints` shrinks most (282 → 197; `emit_type_DEF` 65 → 27); `TBSCertificate` and `GeneralSubtree` grow by 2 (`try_inline_default` for their `DEFAULT`s); `InhibitAnyPolicy` and `BaseCRLNumber` only move lines between functions. |
+
+No flag at the pin changes what the fixer does to these schemas (a fixer flag
+adds one unattributed debug line), so neither pair has a pink tile; the mark is
+tested on an edited trace. The browser page offers the demo pair behind the
+Compilation view's **Compare** button; the PKIX pair is left out of the page's
+download.
 
 ## In a browser
 
@@ -345,6 +403,7 @@ python3 tools/layout_png.py cert.layout.json cert.png      # a flat 2D look (Pil
 | `pkix` (city) | as above | | `datasets/pkix/schema.json` |
 | `recursion` (city) | the fork's `tests/tests-asn1c-compiler/92-circular-loops-OK.asn1` | | `datasets/recursion/schema.json` |
 | `pkix`, `demo` (compile trace) | as above | | `datasets/{pkix,demo}/compile.json`, with `schema.json` beside each; the compilation view replays them |
+| `pkix`, `demo` (compare pairs) | as above | | `datasets/pkix/compile-fwide-types.json`, `datasets/demo/compile-no-gen-OER.json`: the same pin with one flag changed, for compare mode |
 
 The committed layouts are what the pinned fork produces: CI regenerates them
 and fails if they differ (`cmake --build build --target update-datasets`
@@ -404,7 +463,7 @@ Local checkouts replace either download:
 | 0024 C3: cross-link with the strips | `file:line` in the strip view's pick panel (#5) |
 | 0034 K0: `asn1-viz-compile-trace`, `asn1-compile/1`, golden tests, `codeBytes` | done (#13) |
 | 0034 K1: scene: stage scrubber, pulses, diff marks, floors, skeleton library, picking (native and browser) | done |
-| 0034 K2: compare mode (G4) | not started; **C** is reserved for it |
+| 0034 K2: compare mode (G4): `--flag` in the trace tool, flag-set pairs for the demo and PKIX, `--compare`, **C**, the page's Compare button | done; checked with flag sets at one pin (a second `asn1c.ref` in CI is out of scope) |
 | 0034 K3: browser datasets (PKIX), README pipeline diagram | the demo trace is in the page; PKIX is not yet |
 
 Follow-ups, not done here:

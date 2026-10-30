@@ -11,7 +11,8 @@
 // device pixel ratio (1 on the desktop, 3 on the iPhone 13; --dpr overrides
 // the phone's). The compilation replay plays, pauses, steps a stage, and
 // seeks from the page's range and from a click (or tap) on the canvas's own
-// scrubber. Writes a PNG per dataset.
+// scrubber; Compare switches the demo pair into compare mode and back.
+// Writes a PNG per dataset.
 'use strict';
 const fs = require('fs');
 const path = require('path');
@@ -166,6 +167,29 @@ const expected = [
     if (Math.abs(tapped.replay.bar - 0.85) > 0.08) await fail('a click on the canvas scrubber did not seek there: ' + JSON.stringify(tapped.replay));
     if (tapped.selected !== sel) await fail('a click on the scrubber changed the selection');
     await canvas.screenshot({ path: path.join(outDir, 'compile-seeked.png'), timeout: 180000 });
+  }
+
+  // Compare mode (RFC 0034 G4): the Compare button opens the demo's pair
+  // (default flags against -no-gen-OER) as one city, the replay's controls
+  // step aside, and a second press goes back to the replay.
+  {
+    await page.locator('#compare').click();
+    await page.waitForTimeout(1000);
+    const on = await status();
+    const summary = on.panel.map((l) => l.text).join(' | ');
+    console.log(`compare: on ${on.compare && on.compare.on}, selected ${on.selected}; ${summary}`);
+    if (!on.compare || !on.compare.on) await fail('the Compare button did not turn compare mode on');
+    if (!summary.includes('types changed: 2 of 2') || !summary.includes('-no-gen-OER'))
+      await fail('the compare panel does not sum up the demo pair: ' + summary);
+    if (await page.locator('#play').isVisible()) await fail('the replay controls stayed in compare mode');
+    const shot = await canvas.screenshot({ path: path.join(outDir, 'compare.png'), timeout: 180000 });
+    const colours = colourCount(shot);
+    console.log(`compare: ${colours} colours`);
+    if (colours < 20) await fail(`compare mode drew only ${colours} colours`);
+    await page.locator('#compare').click();
+    await page.waitForTimeout(600);
+    const off = await status();
+    if (off.compare.on || !off.replay) await fail('a second press did not go back to the replay: ' + JSON.stringify(off.compare));
   }
 
   // A real click or tap on the canvas, through SDL and the ray cast. On the

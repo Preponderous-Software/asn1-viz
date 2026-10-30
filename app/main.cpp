@@ -1,6 +1,7 @@
 // asn1-viz: the desktop viewer.
 //
 //   asn1-viz [FILE] [options]
+//   asn1-viz --compare A.json B.json [options]
 //
 // FILE is an asn1-layout/1 document (bit strips, RFC 0023), an
 // asn1-schema/1 document (the schema city, RFC 0024) or an asn1-compile/1
@@ -16,6 +17,9 @@
 //   --no-loops           city: do not draw the recursion loops
 //   --at F               compile: start paused at fraction F of the run (0..1)
 //   --no-lookups         compile: leave the fixer's lookup events off the timeline
+//   --compare A B        two asn1-compile/1 traces of one schema, compared (RFC 0034 G4);
+//                        C switches between the comparison and A's replay
+//   --pick Type/function compile, compare: select a floor
 //   --lane N             ...in lane N (default 0)
 //   --click X Y          pick what is under pixel (X, Y), as a mouse click would
 //   --links D            link every field of tree depth D across lanes (0: off)
@@ -36,6 +40,7 @@
 #include <string>
 
 #include "model/layout.h"
+#include "view/compare_view.h"
 #include "view/compile_view.h"
 #include "view/open.h"
 #include "view/shell.h"
@@ -46,7 +51,7 @@ using namespace asn1viz;
 namespace {
 
 struct Args {
-    std::string file;
+    std::string file, compareB;
     bool headless = false;
     std::string shot, orbitDir, tourDir, replayDir;
     int frames = 36;
@@ -70,7 +75,7 @@ struct Args {
     std::fprintf(stderr,
                  "usage: asn1-viz [FILE] [--pick PATH] [--lane N] [--click X Y] [--links D]\n"
                  "                [--row-bits N] [--yaw D] [--pitch D] [--zoom F] [--focus]\n"
-                 "                [--at F] [--no-lookups]\n"
+                 "                [--at F] [--no-lookups] [--compare A.json B.json]\n"
                  "                [--width W --height H] [--headless (--shot PATH | --orbit DIR | --replay DIR [--frames N])]\n");
     std::exit(code);
 }
@@ -90,6 +95,10 @@ Args parse(int argc, char** argv) {
         else if (s == "--replay") a.replayDir = next();
         else if (s == "--at") a.at = static_cast<float>(std::atof(next()));
         else if (s == "--no-lookups") a.noLookups = true;
+        else if (s == "--compare") {
+            a.file = next();
+            a.compareB = next();
+        }
         else if (s == "--frames") a.frames = std::atoi(next());
         else if (s == "--width") a.width = std::atoi(next());
         else if (s == "--height") a.height = std::atoi(next());
@@ -218,7 +227,8 @@ int main(int argc, char** argv) {
         // Headless renders hold the playhead still (at the start, if no --at).
         oo.at = args.headless && args.at < 0 ? 0 : args.at;
         oo.hideLookups = args.noLookups;
-        std::unique_ptr<Scene> scene = openScene(args.file, oo);
+        std::unique_ptr<Scene> scene =
+            args.compareB.empty() ? openScene(args.file, oo) : openCompare(args.file, args.compareB, oo);
         strata::EngineDesc desc;
         desc.surface = args.headless ? STRATA_SURFACE_HEADLESS : STRATA_SURFACE_WINDOW;
         desc.width = args.width;
@@ -251,11 +261,17 @@ int main(int argc, char** argv) {
                 tour(shell, *engine, *strips, args);
             }
             if (!args.replayDir.empty()) {
-                auto* compile = dynamic_cast<CompileView*>(scene.get());
+                auto* compile = replayOf(*scene);
                 if (!compile) throw std::runtime_error("--replay draws an asn1-compile/1 trace only");
                 replay(shell, *engine, *compile, args);
             }
-            if (auto* compile = dynamic_cast<CompileView*>(scene.get()))
+            if (const auto* pair = dynamic_cast<const CompilePair*>(scene.get()); pair && pair->comparing()) {
+                const CompileCompare& c = pair->comparison().compare();
+                std::printf("compare %s -> %s: %d types changed, %d lines -> %d, fixer differs on %d types\n",
+                            CompileCompare::flagsLabel(c.a()).c_str(), CompileCompare::flagsLabel(c.b()).c_str(),
+                            c.typesChanged(), c.totalA(), c.totalB(), c.typesFixerDiffers());
+            }
+            if (auto* compile = replayOf(*scene))
                 std::printf("stage %s, step %d of %d\n", stageName(compile->replay().stage()),
                             static_cast<int>(compile->replay().position()), compile->replay().steps());
             const std::string selected = selectionOf(*scene);

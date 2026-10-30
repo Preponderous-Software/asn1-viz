@@ -70,6 +70,16 @@ jobs:
           mkdir -p shots/demo-replay
           ./build/asn1-viz datasets/demo/compile.json --headless --replay shots/demo-replay --frames 6 | tee replay.log
           grep -q 'wrote 6 frames' replay.log
+          # Compare mode (RFC 0034 G4): PKIX against its -fwide-types run, a floor picked by
+          # name, and a real click on the demo's OER floor (gone without OER).
+          ./build/asn1-viz --compare datasets/pkix/compile.json datasets/pkix/compile-fwide-types.json --headless \
+            --shot shots/pkix-compare.png --pick BasicConstraints/emit_type_DEF | tee compare.log
+          grep -q -- '-fwide-types: 9 types changed, 26292 lines -> 26172' compare.log
+          grep -q 'selected BasicConstraints/emit_type_DEF' compare.log
+          ./build/asn1-viz --compare datasets/demo/compile.json datasets/demo/compile-no-gen-OER.json --headless \
+            --shot shots/demo-compare.png --click 612 148 | tee compare-click.log
+          grep -q 'selected Msg/emit_member_OER_constraints' compare-click.log
+          test -s shots/pkix-compare.png && test -s shots/demo-compare.png
           test -s shots/demo-compile.png && test -s shots/demo-replay/frame-005.png
           test -s shots/pkix-strips.png && test -s shots/demo-click.png && test -s shots/pkix-canonical.png
           test -s shots/pkix-city.png && test -s shots/recursion-city.png
