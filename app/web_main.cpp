@@ -9,12 +9,14 @@
 // desktop (drag to orbit, right-drag or two fingers to pan, wheel to zoom,
 // click or tap to pick).
 #include <cstdio>
+#include <functional>
 #include <memory>
 #include <string>
 
 #include <emscripten/emscripten.h>
 #include <emscripten/html5.h>
 
+#include "view/compare_view.h"
 #include "view/compile_view.h"
 #include "view/open.h"
 #include "view/shell.h"
@@ -28,6 +30,7 @@ struct Dataset {
     const char* file;
     const char* pick;
     int lane, links, hops;
+    const char* compareWith = nullptr;  // compile: a second trace of the same schema (RFC 0034 G4)
 };
 
 // The order the page's buttons use.
@@ -37,7 +40,8 @@ const Dataset kSets[] = {
     {"demo", "/datasets/demo/msg.layout.json", "Msg.period", 0, 0, 1},
     {"city", "/datasets/pkix/schema.json", "Certificate", 0, 0, 3},
     {"recursion", "/datasets/recursion/schema.json", "Everything", 0, 0, 2},
-    {"compile", "/datasets/demo/compile.json", "Msg", 0, 0, 1},
+    // Compared with the same pin's run without OER: what OER costs per type.
+    {"compile", "/datasets/demo/compile.json", "Msg", 0, 0, 1, "/datasets/demo/compile-no-gen-OER.json"},
 };
 constexpr int kSetCount = static_cast<int>(sizeof kSets / sizeof kSets[0]);
 
@@ -53,6 +57,8 @@ struct App {
 };
 
 App* app = nullptr;
+
+int toggleCompare();
 
 // SDL's pointer events are in its window's units: the size the page asked
 // for, which is less than the CSS size when the page caps a high device pixel
@@ -74,7 +80,15 @@ void frame(void*) {
     if (!app->shell) return;
     try {
         StrataEvent e;
-        while (app->engine->pollEvent(e)) app->shell->handle(e);
+        while (app->engine->pollEvent(e)) {
+            // C on a lone trace with a comparison to open: open it (a pair takes C itself).
+            if (e.type == STRATA_EVENT_KEY_DOWN && e.scancode == 6 && dynamic_cast<CompileView*>(app->scene.get()) &&
+                app->dataset >= 0 && kSets[app->dataset].compareWith) {
+                toggleCompare();
+                continue;
+            }
+            app->shell->handle(e);
+        }
         app->shell->frame();
         app->engine->present();
     } catch (const std::exception& ex) {
@@ -100,6 +114,38 @@ void jsonString(std::string& out, const std::string& s) {
     out += '"';
 }
 
+// Replaces the scene, keeping the engine (its meshes cleared).
+bool replaceScene(const char* what, const std::function<std::unique_ptr<Scene>()>& open) {
+    try {
+        app->shell.reset();
+        app->scene.reset();
+        app->engine->clearMeshes();
+        app->scene = open();
+        app->shell = std::make_unique<Shell>(*app->engine, *app->scene);
+        fitPointer();
+        return true;
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "asn1-viz: cannot open %s: %s\n", what, e.what());
+        return false;
+    }
+}
+
+// Compare mode on the compilation dataset: opens the pair the first time
+// (the second trace is only read then), and switches it after. 1: comparing.
+int toggleCompare() {
+    if (!app || !app->scene) return 0;
+    if (auto* p = dynamic_cast<CompilePair*>(app->scene.get())) {
+        p->setComparing(!p->comparing());
+        return p->comparing() ? 1 : 0;
+    }
+    if (app->dataset < 0 || !kSets[app->dataset].compareWith) return 0;
+    const Dataset& d = kSets[app->dataset];
+    OpenOptions o;
+    o.pick = d.pick;
+    o.compact = app->compact;
+    return replaceScene(d.compareWith, [&]() { return openCompare(d.file, d.compareWith, o, true); }) ? 1 : 0;
+}
+
 }  // namespace
 
 extern "C" {
@@ -114,20 +160,12 @@ EMSCRIPTEN_KEEPALIVE int asn1viz_open(int index) {
     o.links = d.links;
     o.hops = d.hops;
     o.compact = app->compact;
-    try {
-        app->shell.reset();
-        app->scene.reset();
-        app->engine->clearMeshes();
-        app->scene = openScene(d.file, o);
-        app->shell = std::make_unique<Shell>(*app->engine, *app->scene);
-        fitPointer();
-        app->dataset = index;
-        return 1;
-    } catch (const std::exception& e) {
-        std::fprintf(stderr, "asn1-viz: cannot open %s: %s\n", d.file, e.what());
-        return 0;
-    }
+    if (!replaceScene(d.file, [&]() { return openScene(d.file, o); })) return 0;
+    app->dataset = index;
+    return 1;
 }
+// Compare mode (RFC 0034 G4) on or off, on a dataset that has a comparison; 1: on.
+EMSCRIPTEN_KEEPALIVE int asn1viz_compare() { return toggleCompare(); }
 // The canvas changed size: it is cssW x cssH CSS pixels, drawn at w x h
 // (the page caps the device pixel ratio); `compact` (a narrow page) leaves
 // out the legend and moves the pick panel to the page.
@@ -170,7 +208,7 @@ EMSCRIPTEN_KEEPALIVE void asn1viz_bench_view(double yawDeg, double pitchDeg, dou
 // page's range input, as the canvas's bar is drawn); no-op in other views.
 EMSCRIPTEN_KEEPALIVE void asn1viz_seek(double f) {
     if (!app || !app->scene) return;
-    if (auto* v = dynamic_cast<CompileView*>(app->scene.get())) v->seekBar(static_cast<float>(f));
+    if (auto* v = replayOf(*app->scene)) v->seekBar(static_cast<float>(f));
 }
 EMSCRIPTEN_KEEPALIVE void asn1viz_zoom(double factor) {
     if (app && app->shell && factor > 0) app->shell->camera().distance *= static_cast<float>(factor);
@@ -189,7 +227,12 @@ EMSCRIPTEN_KEEPALIVE const char* asn1viz_status() {
     jsonString(o, app->dataset >= 0 ? kSets[app->dataset].id : "");
     o += ",\"selected\":";
     jsonString(o, app->scene ? selectionOf(*app->scene) : "");
-    if (const auto* v = app->scene ? dynamic_cast<const CompileView*>(app->scene.get()) : nullptr) {
+    if (app->dataset >= 0 && kSets[app->dataset].compareWith) {
+        const auto* p = app->scene ? dynamic_cast<const CompilePair*>(app->scene.get()) : nullptr;
+        o += ",\"compare\":{\"available\":true,\"on\":";
+        o += p && p->comparing() ? "true}" : "false}";
+    }
+    if (const auto* v = app->scene ? replayOf(*app->scene) : nullptr) {
         o += ",\"replay\":";
         o += v->statusJson();
     }

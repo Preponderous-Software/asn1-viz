@@ -173,8 +173,8 @@ bool CompileView::key(int32_t sc) {
         case kScanEnd: r.toEnd(); return true;
         case kScanL: r.setLookupFiltered(!r.lookupFiltered()); marksDirty_ = true; return true;
         case kScanC:
-            // The seam for compare mode (RFC 0034 G4): phase K2.
-            note_ = "compare mode (C) needs a second trace: RFC 0034 phase K2";
+            // Compare mode (RFC 0034 G4) is a CompilePair's (view/compare_view.h); alone, there is no B.
+            note_ = "compare mode (C) needs a second trace: asn1-viz --compare A.json B.json";
             noteUntil_ = std::chrono::steady_clock::now() + std::chrono::seconds(4);
             return true;
         case kScanF: return selected_.kind != CompilePick::None;

@@ -2,7 +2,7 @@
  *
  *   asn1-viz-compile-trace -S SKELETONS --out TRACE.json
  *                          [--schema-out SCHEMA.json] [--schema-name NAME]
- *                          SCHEMA.asn1...
+ *                          [--flag ASN1C-FLAG]... SCHEMA.asn1...
  *
  * The pinned asn1c's own libraries, run in-process, stage by stage, the way
  * the asn1c driver (asn1c/asn1c.c) runs them:
@@ -18,6 +18,14 @@
  *            origin comment) and attributed to its assignment by asn1c's own
  *            file naming (asn1c_make_identifier).
  *   save     the skeleton files the compiler copied, with their sizes.
+ *
+ * --flag passes one of asn1c's own code-generation flags on (repeatable):
+ * -gen-X / -no-gen-X for a codec or helper (OER, UPER, APER, BER, CER, XER,
+ * JER, CBOR, print, random-fill, example) and the -f flags that only set
+ * compiler or fixer bits (-fcompound-names, -fwide-types, -fno-constraints,
+ * ...), mapped to the same A1C_ and A1F_ bits as asn1c/asn1c.c maps them at
+ * the pin. They are recorded in the trace's "flags", so two traces of one
+ * schema with different flags can be compared (RFC 0034 G4).
  *
  * The temporary directory is deleted; only counts are kept. A stage that
  * fails is recorded as "failed" (and the stages after it as "skipped"),
@@ -714,11 +722,75 @@ static int copy_file(const char *src, const char *dst) {
     return rc;
 }
 
+/* ---------------------------------------------------------------- asn1c's flags */
+
+/* The -f flags asn1c/asn1c.c (asn1c_handle_simple_f_option) maps straight to
+ * compiler and fixer bits at the pin. Left out: -flink-skeletons (symlinks
+ * into the skeleton tree), -fgen-only-pdu-deps (needs -pdu) and
+ * -flist-deps (prints, writes nothing). */
+static const struct {
+    const char *name;
+    uint64_t compiler;
+    int fixer;
+} f_flags[] = {
+    {"all-defs-global", A1C_ALL_DEFS_GLOBAL, 0},
+    {"bless-SIZE", 0, A1F_EXTENDED_SizeConstraint},
+    {"compound-names", A1C_COMPOUND_NAMES, A1F_COMPOUND_NAMES},
+    {"indirect-choice", A1C_INDIRECT_CHOICE, 0},
+    {"prefer-import-source", 0, A1F_PREFER_IMPORT_SOURCE},
+    {"wide-types", A1C_USE_WIDE_TYPES, 0},
+    {"line-refs", A1C_LINE_REFS, 0},
+    {"no-constraints", A1C_NO_CONSTRAINTS, 0},
+    {"no-include-deps", A1C_NO_INCLUDE_DEPS, 0},
+    {"includes-quoted", A1C_INCLUDES_QUOTED, 0},
+    {"unnamed-unions", A1C_UNNAMED_UNIONS, 0},
+};
+
+/* asn1c_codec_flag at the pin (without autotools: the trace counts code). */
+static uint64_t codec_flag(const char *name) {
+    static const struct {
+        const char *name;
+        uint64_t flag;
+    } codecs[] = {{"BER", A1C_GEN_BER},     {"XER", A1C_GEN_XER},           {"JER", A1C_GEN_JER},
+                  {"CBOR", A1C_GEN_CBOR},   {"CER", A1C_GEN_CER},           {"OER", A1C_GEN_OER},
+                  {"UPER", A1C_GEN_UPER},   {"APER", A1C_GEN_APER},         {"print", A1C_GEN_PRINT},
+                  {"random-fill", A1C_GEN_RFILL}, {"example", A1C_GEN_EXAMPLE}};
+    for(size_t i = 0; i < sizeof codecs / sizeof codecs[0]; i++)
+        if(!strcmp(name, codecs[i].name)) return codecs[i].flag;
+    return 0;
+}
+
+/* Applies one asn1c flag as asn1c/asn1c.c does; 0, or -1 if it is not one
+ * the trace takes. */
+static int apply_flag(const char *arg, uint64_t *cflags, int *fflags) {
+    if(!strncmp(arg, "-gen-", 5) || !strncmp(arg, "-no-gen-", 8)) {
+        const int on = arg[1] == 'g';
+        const uint64_t flag = codec_flag(arg + (on ? 5 : 8));
+        if(!flag) return -1;
+        if(on) {
+            *cflags |= flag;
+            if(flag == A1C_GEN_CER) *cflags |= A1C_GEN_BER;
+        } else {
+            *cflags &= ~flag;
+            if(flag == A1C_GEN_BER) *cflags &= ~(uint64_t)A1C_GEN_CER;
+        }
+        return 0;
+    }
+    if(!strncmp(arg, "-f", 2))
+        for(size_t i = 0; i < sizeof f_flags / sizeof f_flags[0]; i++)
+            if(!strcmp(arg + 2, f_flags[i].name)) {
+                *cflags |= f_flags[i].compiler;
+                *fflags |= f_flags[i].fixer;
+                return 0;
+            }
+    return -1;
+}
+
 /* ---------------------------------------------------------------- main */
 
 static void usage(void) {
     fprintf(stderr, "usage: " PROG " -S SKELETONS --out TRACE.json [--schema-out SCHEMA.json] [--schema-name NAME] "
-                    "SCHEMA.asn1...\n");
+                    "[--flag ASN1C-FLAG]... SCHEMA.asn1...\n");
 }
 
 static void write_hist(FILE *out, const histo_t *h) {
@@ -735,8 +807,22 @@ int main(int argc, char **argv) {
     const char *out_path = NULL, *schema_out = NULL, *schema_name = NULL, *skeletons = NULL;
     char **inputs = NULL;
     int ninputs = 0;
+    /* asn1c's default flags (asn1c/asn1c.c), the origin lines, and --flag's. */
+    uint64_t cflags = (uint64_t)A1C_NO_C99 | A1C_GEN_BER | A1C_GEN_XER | A1C_GEN_OER | A1C_GEN_UPER | A1C_GEN_APER
+                      | A1C_GEN_PRINT | A1C_GEN_RFILL | A1C_GEN_EXAMPLE | A1C_GEN_JER | A1C_GEN_CBOR | A1C_GEN_CER
+                      | A1C_DEBUG_OUTPUT_ORIGIN_LINES;
+    int fflags = 0;
+    const char *flags[64];
+    int nflags = 0;
+    flags[nflags++] = "-debug-output-origin-lines";
     for(int i = 1; i < argc; i++) {
-        if(!strcmp(argv[i], "--out") && i + 1 < argc) out_path = argv[++i];
+        if(!strcmp(argv[i], "--flag") && i + 1 < argc) {
+            if(apply_flag(argv[++i], &cflags, &fflags) || nflags == (int)(sizeof flags / sizeof flags[0])) {
+                fprintf(stderr, PROG ": --flag %s: not an asn1c flag the trace takes\n", argv[i]);
+                return 2;
+            }
+            flags[nflags++] = argv[i];
+        } else if(!strcmp(argv[i], "--out") && i + 1 < argc) out_path = argv[++i];
         else if(!strcmp(argv[i], "--schema-out") && i + 1 < argc) schema_out = argv[++i];
         else if(!strcmp(argv[i], "--schema-name") && i + 1 < argc) schema_name = argv[++i];
         else if(!strcmp(argv[i], "-S") && i + 1 < argc) skeletons = argv[++i];
@@ -750,6 +836,11 @@ int main(int argc, char **argv) {
     }
     if(!out_path || !skeletons || !ninputs) {
         usage();
+        return 2;
+    }
+    /* asn1c refuses this pair (asn1c_validate_options). */
+    if((cflags & A1C_NO_CONSTRAINTS) && (cflags & (A1C_GEN_OER | A1C_GEN_UPER | A1C_GEN_APER))) {
+        fprintf(stderr, PROG ": -fno-constraints is incompatible with -gen-OER, -gen-UPER, or -gen-APER\n");
         return 2;
     }
     char *skel_abs = realpath(skeletons, NULL);
@@ -831,7 +922,7 @@ int main(int argc, char **argv) {
     if(ok) {
         if(import_standard_modules(asn, skel_abs) == 0) asn1f_use_standard_namespaces(asn);
         g_capturing = 1;
-        fx = asn1f_process(asn, A1F_DEBUG, fixer_logger);
+        fx = asn1f_process(asn, A1F_DEBUG | fflags, fixer_logger);
         g_capturing = 0;
         fix_status = fx < 0 ? "failed" : "ok";
         ok = fx >= 0;
@@ -871,9 +962,6 @@ int main(int argc, char **argv) {
     /* Compile, into a temporary directory. */
     gfile_t *G = NULL;
     int nG = 0, compile_rc = 0;
-    const uint64_t cflags = (uint64_t)A1C_NO_C99 | A1C_GEN_BER | A1C_GEN_XER | A1C_GEN_OER | A1C_GEN_UPER | A1C_GEN_APER
-                       | A1C_GEN_PRINT | A1C_GEN_RFILL | A1C_GEN_EXAMPLE | A1C_GEN_JER | A1C_GEN_CBOR | A1C_GEN_CER
-                       | A1C_DEBUG_OUTPUT_ORIGIN_LINES;
     if(ok) {
         if(chdir("out")) {
             fprintf(stderr, PROG ": cannot use %s/out\n", dir);
@@ -883,7 +971,7 @@ int main(int argc, char **argv) {
             char *cargv[256];
             int cargc = 0;
             cargv[cargc++] = (char *)"asn1c";
-            cargv[cargc++] = (char *)"-debug-output-origin-lines";
+            for(int i = 0; i < nflags; i++) cargv[cargc++] = (char *)flags[i];
             int optc = cargc;
             for(int i = 0; i < ninputs && cargc < 255; i++) cargv[cargc++] = inputs[i];
             cargv[cargc] = NULL;
@@ -980,7 +1068,12 @@ int main(int argc, char **argv) {
         return 1;
     }
     fprintf(out, "{\n  \"format\": \"asn1-compile/1\",\n  \"asn1c\": \"%s\",\n", ASN1VIZ_ASN1C_COMMIT);
-    fprintf(out, "  \"flags\": [\"-debug-output-origin-lines\"],\n  \"schema\": ");
+    fprintf(out, "  \"flags\": [");
+    for(int i = 0; i < nflags; i++) {
+        fputs(i ? ", " : "", out);
+        asn1viz_json_string(out, flags[i]);
+    }
+    fprintf(out, "],\n  \"schema\": ");
     if(ok && schema_name) asn1viz_json_string(out, schema_name);
     else fputs("null", out);
     fprintf(out, ",\n  \"inputs\": [");

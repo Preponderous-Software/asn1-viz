@@ -6,7 +6,8 @@
 // edge. A scrubber (drawn on the canvas, drag or click it) spans the run.
 //
 // Keys: Space play/pause, [ ] a stage, , . a step, L lookup events on/off,
-// F focus, H home (the shell). C is kept for compare mode (G4, phase K2).
+// F focus, H home (the shell). C switches to compare mode (G4) when a
+// second trace is loaded (CompilePair, view/compare_view.h).
 #pragma once
 
 #include <chrono>
@@ -47,10 +48,6 @@ public:
     void seekBar(float f) { replay().seek(positionAt(f)); }
     // The playhead as the page shows it: {"stage":..,"pos":..,"steps":..,"fraction":..,"playing":..,"lookups":..}.
     std::string statusJson() const;
-
-    // Compare mode (RFC 0034 G4) is phase K2. This is its seam: a second
-    // trace of the same schema will be held here and drawn as floor deltas.
-    bool compareAvailable() const { return false; }
 
 private:
     void rebuild(strata::Engine& engine, bool geometry);

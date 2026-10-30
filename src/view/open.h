@@ -28,6 +28,12 @@ struct OpenOptions {
 
 std::unique_ptr<Scene> openScene(const std::string& file, const OpenOptions& options);
 
+// Two asn1-compile/1 traces of the same schema (RFC 0034 G4): A's replay and
+// the comparison of A with B, as one scene (C switches); `comparing` starts
+// on the comparison. Throws if B is not a trace of A's schema.
+std::unique_ptr<Scene> openCompare(const std::string& fileA, const std::string& fileB, const OpenOptions& options,
+                                   bool comparing = true);
+
 // What is selected, as a path (strips), a type name (city) or a type,
 // "Type/function" band or skeleton (compile); "" for nothing.
 std::string selectionOf(const Scene& scene);

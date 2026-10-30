@@ -45,6 +45,8 @@
   /* The compilation view's scrubber: a wide, finger-sized range. */
   #scrub { flex: 1 1 160px; min-width: 120px; height: 28px; accent-color: var(--accent); margin: 0 4px; }
   #stageName { color: var(--dim); font: 12px ui-monospace, monospace; min-width: 5.5em; }
+  /* Compare mode (RFC 0034 G4): the replay's controls step aside. */
+  body.comparing .for-compile > :not(#compare) { display: none; }
   a { color: var(--accent); }
   @media (max-width: 640px) {
     #selected { max-width: 100%; margin-left: 0; flex-basis: 100%; }
@@ -100,6 +102,7 @@
     <input id="scrub" type="range" min="0" max="1000" value="0" aria-label="Scrub through the compilation">
     <span id="stageName"></span>
     <button id="lookups" data-key="15" title="Show or hide the fixer's lookup events (L)" aria-pressed="true">Lookups</button>
+    <button id="compare" title="Compare with the same asn1c run without OER: what OER costs per type (C)" aria-pressed="false">Compare</button>
   </div>
 </div>
 
@@ -153,6 +156,9 @@
       document.getElementById('lookups').setAttribute('aria-pressed', String(s.replay.lookups));
       document.getElementById('stageName').textContent = s.replay.stage;
     }
+    const comparing = !!(s.compare && s.compare.on);
+    document.body.classList.toggle('comparing', comparing);
+    document.getElementById('compare').setAttribute('aria-pressed', String(comparing));
     const key = JSON.stringify(s.panel);
     if (key !== lastSheet) {
       lastSheet = key;
@@ -184,6 +190,7 @@
         status: Module.cwrap('asn1viz_status', 'string', []),
         benchView: Module.cwrap('asn1viz_bench_view', null, ['number', 'number', 'number']),
         seek: Module.cwrap('asn1viz_seek', null, ['number']),
+        compare: Module.cwrap('asn1viz_compare', 'number', []),
       };
       window.asn1viz = api;
       loading.style.display = 'none';
@@ -215,6 +222,10 @@
   scrub.addEventListener('input', () => { scrubbing = true; if (api) api.seek(Number(scrub.value) / 1000); });
   scrub.addEventListener('change', () => { scrubbing = false; canvas.focus(); });
   scrub.addEventListener('pointerup', () => { scrubbing = false; });
+  document.getElementById('compare').addEventListener('click', () => {
+    if (api) { api.compare(); refresh(); }
+    canvas.focus();
+  });
   document.getElementById('zoomIn').addEventListener('click', () => api && api.zoom(0.8));
   document.getElementById('zoomOut').addEventListener('click', () => api && api.zoom(1.25));
   window.addEventListener('resize', fit);

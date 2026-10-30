@@ -56,18 +56,20 @@ add_library(asn1viz_model STATIC
   src/model/layout.cpp
   src/model/schema.cpp
   src/model/compile.cpp
+  src/model/compare.cpp
   src/scene/camera.cpp
   src/scene/mesh.cpp
   src/scene/strip.cpp
   src/scene/city.cpp
   src/scene/replay.cpp
-  src/scene/compile_city.cpp)
+  src/scene/compile_city.cpp
+  src/scene/compare_city.cpp)
 target_include_directories(asn1viz_model PUBLIC src)
 asn1viz_warnings(asn1viz_model)
 
 if(ASN1VIZ_BUILD_TESTS)
   enable_testing()
-  foreach(t json mesh camera layout strip schema city compile replay)
+  foreach(t json mesh camera layout strip schema city compile replay compare)
     add_executable(test_${t} tests/test_${t}.cpp)
     target_link_libraries(test_${t} PRIVATE asn1viz_model)
     target_include_directories(test_${t} PRIVATE tests)
@@ -162,6 +164,24 @@ if(ASN1VIZ_WITH_ASN1C)
             --schema-out "${DEMO_SCHEMA}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/demo.asn1"
     DEPENDS asn1-viz-compile-trace tests/fixtures/demo.asn1
     COMMENT "Tracing asn1c over the demo module")
+  # Compare mode's pairs (RFC 0034 G4): the same pin with one flag changed,
+  # so the difference is that flag's. The demo without OER (what OER costs
+  # per type; the browser page's comparison) and PKIX with -fwide-types (the
+  # flag the PKIX layouts are built with; growth and shrinkage both).
+  set(DEMO_COMPARE "${ASN1VIZ_DATASETS_OUT}/demo/compile-no-gen-OER.json")
+  add_custom_command(OUTPUT "${DEMO_COMPARE}"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${ASN1VIZ_DATASETS_OUT}/demo"
+    COMMAND asn1-viz-compile-trace -S "${ASN1C_SOURCE_DIR}/skeletons" --out "${DEMO_COMPARE}"
+            --schema-name schema.json --flag -no-gen-OER "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/demo.asn1"
+    DEPENDS asn1-viz-compile-trace tests/fixtures/demo.asn1
+    COMMENT "Tracing asn1c -no-gen-OER over the demo module")
+  set(PKIX_COMPARE "${ASN1VIZ_DATASETS_OUT}/pkix/compile-fwide-types.json")
+  add_custom_command(OUTPUT "${PKIX_COMPARE}"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${ASN1VIZ_DATASETS_OUT}/pkix"
+    COMMAND asn1-viz-compile-trace -S "${ASN1C_SOURCE_DIR}/skeletons" --out "${PKIX_COMPARE}"
+            --schema-name schema.json --flag -fwide-types ${PKIX_MODULES}
+    DEPENDS asn1-viz-compile-trace
+    COMMENT "Tracing asn1c -fwide-types over the PKIX modules")
   # The recursion demo (RFC 0024 OQ3): the fork's richest circular test schema.
   set(ASN1C_COMPILER_TESTS "${ASN1C_SOURCE_DIR}/tests/tests-asn1c-compiler")
   set(RECURSION_SCHEMA "${ASN1VIZ_DATASETS_OUT}/recursion/schema.json")
@@ -173,7 +193,8 @@ if(ASN1VIZ_WITH_ASN1C)
 
   add_custom_target(datasets ALL DEPENDS "${DEMO_LAYOUT}" "${PKIX_LAYOUT}" "${PKIX_CANONICAL_LAYOUT}"
                                           "${PKIX_SCHEMA}" "${RECURSION_SCHEMA}"
-                                          "${PKIX_COMPILE}" "${DEMO_COMPILE}" "${DEMO_SCHEMA}")
+                                          "${PKIX_COMPILE}" "${DEMO_COMPILE}" "${DEMO_SCHEMA}"
+                                          "${DEMO_COMPARE}" "${PKIX_COMPARE}")
   # Copies the regenerated, redistributable datasets into datasets/ (commit them).
   add_custom_target(update-datasets
     COMMAND ${CMAKE_COMMAND} -E copy "${PKIX_LAYOUT}" "${CMAKE_CURRENT_SOURCE_DIR}/datasets/pkix/certificate.layout.json"
@@ -183,6 +204,8 @@ if(ASN1VIZ_WITH_ASN1C)
     COMMAND ${CMAKE_COMMAND} -E copy "${PKIX_COMPILE}" "${CMAKE_CURRENT_SOURCE_DIR}/datasets/pkix/compile.json"
     COMMAND ${CMAKE_COMMAND} -E copy "${DEMO_SCHEMA}" "${CMAKE_CURRENT_SOURCE_DIR}/datasets/demo/schema.json"
     COMMAND ${CMAKE_COMMAND} -E copy "${DEMO_COMPILE}" "${CMAKE_CURRENT_SOURCE_DIR}/datasets/demo/compile.json"
+    COMMAND ${CMAKE_COMMAND} -E copy "${DEMO_COMPARE}" "${CMAKE_CURRENT_SOURCE_DIR}/datasets/demo/compile-no-gen-OER.json"
+    COMMAND ${CMAKE_COMMAND} -E copy "${PKIX_COMPARE}" "${CMAKE_CURRENT_SOURCE_DIR}/datasets/pkix/compile-fwide-types.json"
     COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_SOURCE_DIR}/datasets/recursion"
     COMMAND ${CMAKE_COMMAND} -E copy "${RECURSION_SCHEMA}" "${CMAKE_CURRENT_SOURCE_DIR}/datasets/recursion/schema.json"
     DEPENDS datasets)
@@ -236,8 +259,14 @@ if(ASN1VIZ_WITH_ASN1C)
                          "${ASN1VIZ_DATASETS_OUT}/${_ds}/${_f}.json")
       endforeach()
     endforeach()
+    foreach(_f demo/compile-no-gen-OER pkix/compile-fwide-types)
+      string(REPLACE "/" "_" _name "${_f}")
+      add_test(NAME ${_name}_up_to_date
+               COMMAND diff -u "${CMAKE_CURRENT_SOURCE_DIR}/datasets/${_f}.json" "${ASN1VIZ_DATASETS_OUT}/${_f}.json")
+    endforeach()
     # The golden counts, measured on the freshly generated traces.
     add_test(NAME compile_golden_generated COMMAND test_compile "${CMAKE_BINARY_DIR}")
+    add_test(NAME compare_golden_generated COMMAND test_compare "${CMAKE_BINARY_DIR}")
     add_test(NAME recursion_schema_up_to_date
              COMMAND ${CMAKE_COMMAND} -E compare_files "${RECURSION_SCHEMA}"
                      "${CMAKE_CURRENT_SOURCE_DIR}/datasets/recursion/schema.json")
@@ -273,6 +302,7 @@ if(ASN1VIZ_WITH_STRATA OR ASN1VIZ_WEB)
   FetchContent_MakeAvailable(strata)
 
   add_library(asn1viz_view STATIC src/view/shell.cpp src/view/strip_view.cpp src/view/city_view.cpp src/view/compile_view.cpp
+              src/view/compare_view.cpp
               src/view/open.cpp)
   target_include_directories(asn1viz_view PUBLIC src)
   target_link_libraries(asn1viz_view PUBLIC asn1viz_model strata::static)
@@ -297,9 +327,11 @@ if(ASN1VIZ_WEB)
   file(GLOB_RECURSE ASN1VIZ_WEB_DATA CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/datasets/*.json")
   target_link_options(asn1-viz-web PRIVATE
     -sSTACK_SIZE=1MB
-    "-sEXPORTED_FUNCTIONS=_main,_asn1viz_open,_asn1viz_resize,_asn1viz_key,_asn1viz_zoom,_asn1viz_click,_asn1viz_status,_asn1viz_bench_view,_asn1viz_seek"
+    "-sEXPORTED_FUNCTIONS=_main,_asn1viz_open,_asn1viz_resize,_asn1viz_key,_asn1viz_zoom,_asn1viz_click,_asn1viz_status,_asn1viz_bench_view,_asn1viz_seek,_asn1viz_compare"
     -sEXPORTED_RUNTIME_METHODS=ccall,cwrap,UTF8ToString
     "--embed-file=${CMAKE_CURRENT_SOURCE_DIR}/datasets@/datasets"
+    # PKIX's comparison trace is for the desktop; the page compares the demo.
+    "--exclude-file=*/pkix/compile-fwide-types.json"
     "--shell-file=${CMAKE_CURRENT_SOURCE_DIR}/web/shell.html")
   set_property(TARGET asn1-viz-web APPEND PROPERTY LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/web/shell.html" ${ASN1VIZ_WEB_DATA})
   # The loading shell (web/strata-kit, vendored from Strata) and its bridge go
