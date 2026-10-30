@@ -54,6 +54,23 @@ jobs:
           grep -q 'selected Certificate' city.log
           ./build/asn1-viz datasets/recursion/schema.json --headless --shot shots/recursion-city.png --pick Everything | tee rec.log
           grep -q 'selected Everything' rec.log
+          # The compilation replay (RFC 0034 K1) on the demo trace: the finished
+          # run with a floor band picked by name, and a short replay.
+          ./build/asn1-viz datasets/demo/compile.json --headless --shot shots/demo-compile.png --at 1 \
+            --pick Msg/emit_member_table | tee compile.log
+          grep -q 'selected Msg/emit_member_table' compile.log
+          grep -q 'stage Save' compile.log
+          # Real clicks through strata_raycast_meshes: a floor band of Msg, and a skeleton in the library.
+          ./build/asn1-viz datasets/demo/compile.json --headless --shot shots/demo-compile-band.png --at 1 \
+            --click 438 290 | tee band.log
+          grep -q 'selected Msg/emit_member_table' band.log
+          ./build/asn1-viz datasets/demo/compile.json --headless --shot shots/demo-compile-skeleton.png --at 1 \
+            --click 780 380 | tee skel.log
+          grep -qE 'selected [A-Za-z0-9_]+[.][ch]$' skel.log
+          mkdir -p shots/demo-replay
+          ./build/asn1-viz datasets/demo/compile.json --headless --replay shots/demo-replay --frames 6 | tee replay.log
+          grep -q 'wrote 6 frames' replay.log
+          test -s shots/demo-compile.png && test -s shots/demo-replay/frame-005.png
           test -s shots/pkix-strips.png && test -s shots/demo-click.png && test -s shots/pkix-canonical.png
           test -s shots/pkix-city.png && test -s shots/recursion-city.png
       - uses: actions/upload-artifact@v4

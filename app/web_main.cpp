@@ -1,7 +1,8 @@
 // asn1-viz in a browser: the same views on Strata's WebGL 2 backend
 // (Emscripten), with the redistributable datasets built in (RFC 0023 P5,
 // RFC 0024 C3). Nothing is compiled in the page: the layouts and schemas are
-// the committed asn1-layout/1 and asn1-schema/1 files under /datasets.
+// the committed asn1-layout/1, asn1-schema/1 and asn1-compile/1 files under
+// /datasets.
 //
 // The page (web/shell.html) picks a dataset and offers buttons for what keys
 // do on the desktop; mouse and touch go to the canvas through SDL as on the
@@ -14,6 +15,7 @@
 #include <emscripten/emscripten.h>
 #include <emscripten/html5.h>
 
+#include "view/compile_view.h"
 #include "view/open.h"
 #include "view/shell.h"
 
@@ -35,6 +37,7 @@ const Dataset kSets[] = {
     {"demo", "/datasets/demo/msg.layout.json", "Msg.period", 0, 0, 1},
     {"city", "/datasets/pkix/schema.json", "Certificate", 0, 0, 3},
     {"recursion", "/datasets/recursion/schema.json", "Everything", 0, 0, 2},
+    {"compile", "/datasets/demo/compile.json", "Msg", 0, 0, 1},
 };
 constexpr int kSetCount = static_cast<int>(sizeof kSets / sizeof kSets[0]);
 
@@ -163,6 +166,12 @@ EMSCRIPTEN_KEEPALIVE void asn1viz_bench_view(double yawDeg, double pitchDeg, dou
     c.pitchDeg = static_cast<float>(pitchDeg);
     c.distance *= static_cast<float>(distanceScale);
 }
+// The compilation view's scrubber: seeks to fraction f along the bar (the
+// page's range input, as the canvas's bar is drawn); no-op in other views.
+EMSCRIPTEN_KEEPALIVE void asn1viz_seek(double f) {
+    if (!app || !app->scene) return;
+    if (auto* v = dynamic_cast<CompileView*>(app->scene.get())) v->seekBar(static_cast<float>(f));
+}
 EMSCRIPTEN_KEEPALIVE void asn1viz_zoom(double factor) {
     if (app && app->shell && factor > 0) app->shell->camera().distance *= static_cast<float>(factor);
 }
@@ -180,6 +189,10 @@ EMSCRIPTEN_KEEPALIVE const char* asn1viz_status() {
     jsonString(o, app->dataset >= 0 ? kSets[app->dataset].id : "");
     o += ",\"selected\":";
     jsonString(o, app->scene ? selectionOf(*app->scene) : "");
+    if (const auto* v = app->scene ? dynamic_cast<const CompileView*>(app->scene.get()) : nullptr) {
+        o += ",\"replay\":";
+        o += v->statusJson();
+    }
     o += ",\"panel\":[";
     if (app->scene) {
         bool first = true;

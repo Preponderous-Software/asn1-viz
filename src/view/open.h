@@ -1,5 +1,5 @@
-// Opens an asn1-layout/1 or asn1-schema/1 file as the view that draws it
-// (the bit strips or the schema city). Shared by the desktop and browser
+// Opens an asn1-layout/1, asn1-schema/1 or asn1-compile/1 file as the view
+// that draws it (the bit strips, the schema city or the compilation replay). Shared by the desktop and browser
 // viewers.
 #pragma once
 
@@ -19,11 +19,17 @@ struct OpenOptions {
     int hops = 1;        // city: how far the selection's references are followed
     bool loops = true;   // city: draw recursion loops
     bool compact = false; // leave out the legend and key hints
+    // compile: the playhead as a fraction of the run (< 0: from the start,
+    // playing), and the asn1-schema/1 file (default: the trace's "schema",
+    // beside it).
+    float at = -1;
+    bool hideLookups = false;
 };
 
 std::unique_ptr<Scene> openScene(const std::string& file, const OpenOptions& options);
 
-// What is selected, as a path (strips) or a type name (city); "" for nothing.
+// What is selected, as a path (strips), a type name (city) or a type,
+// "Type/function" band or skeleton (compile); "" for nothing.
 std::string selectionOf(const Scene& scene);
 
 }  // namespace asn1viz

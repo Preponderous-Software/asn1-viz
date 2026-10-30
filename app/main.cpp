@@ -2,8 +2,9 @@
 //
 //   asn1-viz [FILE] [options]
 //
-// FILE is an asn1-layout/1 document (bit strips, RFC 0023) or an
-// asn1-schema/1 document (the schema city, RFC 0024); with no FILE,
+// FILE is an asn1-layout/1 document (bit strips, RFC 0023), an
+// asn1-schema/1 document (the schema city, RFC 0024) or an asn1-compile/1
+// trace (the compilation replay over the city, RFC 0034); with no FILE,
 // datasets/pkix/certificate.layout.json is opened if it is there.
 //
 // Options:
@@ -13,6 +14,8 @@
 //                        (default: schema.json beside FILE, if there is one)
 //   --hops N             city: how far the selection's references are followed (1-4)
 //   --no-loops           city: do not draw the recursion loops
+//   --at F               compile: start paused at fraction F of the run (0..1)
+//   --no-lookups         compile: leave the fixer's lookup events off the timeline
 //   --lane N             ...in lane N (default 0)
 //   --click X Y          pick what is under pixel (X, Y), as a mouse click would
 //   --links D            link every field of tree depth D across lanes (0: off)
@@ -23,6 +26,7 @@
 //   --headless --shot PATH                 render one frame to a PNG and exit
 //   --headless --orbit DIR --frames N      N frames turning once around, DIR/frame-000.png ...
 //   --headless --tour DIR [--frames N]     visit each top-level field in turn (N frames per field)
+//   --headless --replay DIR [--frames N]   compile: the whole run in N frames, turning slowly
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -32,6 +36,7 @@
 #include <string>
 
 #include "model/layout.h"
+#include "view/compile_view.h"
 #include "view/open.h"
 #include "view/shell.h"
 #include "view/strip_view.h"
@@ -43,7 +48,7 @@ namespace {
 struct Args {
     std::string file;
     bool headless = false;
-    std::string shot, orbitDir, tourDir;
+    std::string shot, orbitDir, tourDir, replayDir;
     int frames = 36;
     int width = 1280, height = 720;
     std::string pick;
@@ -57,13 +62,16 @@ struct Args {
     std::string schema;
     int hops = 1;
     bool loops = true;
+    float at = -1;
+    bool noLookups = false;
 };
 
 [[noreturn]] void usage(int code) {
     std::fprintf(stderr,
-                 "usage: asn1-viz [FILE.layout.json] [--pick PATH] [--lane N] [--click X Y] [--links D]\n"
+                 "usage: asn1-viz [FILE] [--pick PATH] [--lane N] [--click X Y] [--links D]\n"
                  "                [--row-bits N] [--yaw D] [--pitch D] [--zoom F] [--focus]\n"
-                 "                [--width W --height H] [--headless (--shot PATH | --orbit DIR [--frames N])]\n");
+                 "                [--at F] [--no-lookups]\n"
+                 "                [--width W --height H] [--headless (--shot PATH | --orbit DIR | --replay DIR [--frames N])]\n");
     std::exit(code);
 }
 
@@ -79,6 +87,9 @@ Args parse(int argc, char** argv) {
         else if (s == "--shot") a.shot = next();
         else if (s == "--orbit") a.orbitDir = next();
         else if (s == "--tour") a.tourDir = next();
+        else if (s == "--replay") a.replayDir = next();
+        else if (s == "--at") a.at = static_cast<float>(std::atof(next()));
+        else if (s == "--no-lookups") a.noLookups = true;
         else if (s == "--frames") a.frames = std::atoi(next());
         else if (s == "--width") a.width = std::atoi(next());
         else if (s == "--height") a.height = std::atoi(next());
@@ -110,8 +121,8 @@ Args parse(int argc, char** argv) {
             usage(2);
         }
     }
-    if (a.headless && a.shot.empty() && a.orbitDir.empty() && a.tourDir.empty()) {
-        std::fprintf(stderr, "asn1-viz: --headless needs --shot PATH, --orbit DIR or --tour DIR\n");
+    if (a.headless && a.shot.empty() && a.orbitDir.empty() && a.tourDir.empty() && a.replayDir.empty()) {
+        std::fprintf(stderr, "asn1-viz: --headless needs --shot PATH, --orbit DIR, --tour DIR or --replay DIR\n");
         usage(2);
     }
     if (a.file.empty()) {
@@ -162,6 +173,25 @@ void tour(Shell& shell, strata::Engine& engine, StripView& view, const Args& a) 
     std::printf("wrote %d frames (%zu fields) to %s\n", n, stops.size(), a.tourDir.c_str());
 }
 
+// The compilation replay, start to end, in a.frames frames: each stage gets
+// frames in proportion to its share of the scrubber, the camera turning a
+// little all the while, and the last frame is the finished run.
+void replay(Shell& shell, strata::Engine& engine, CompileView& view, const Args& a) {
+    view.setClock(false);
+    const float yaw0 = shell.camera().yawDeg;
+    const int n = std::max(2, a.frames);
+    for (int i = 0; i < n; ++i) {
+        const float u = static_cast<float>(i) / static_cast<float>(n - 1);
+        view.seekBar(u);
+        shell.camera().yawDeg = yaw0 + 40.0f * u;
+        shell.frame();
+        char name[64];
+        std::snprintf(name, sizeof name, "/frame-%03d.png", i);
+        engine.saveScreenshotPng(a.replayDir + name);
+    }
+    std::printf("wrote %d frames (%d steps) to %s\n", n, view.replay().steps(), a.replayDir.c_str());
+}
+
 void adjustCamera(Shell& shell, const Args& a) {
     OrbitCamera& c = shell.camera();
     if (!std::isnan(a.yaw)) c.yawDeg = a.yaw;
@@ -185,6 +215,9 @@ int main(int argc, char** argv) {
         oo.hops = args.hops;
         oo.loops = args.loops;
         oo.compact = args.width < 1000;
+        // Headless renders hold the playhead still (at the start, if no --at).
+        oo.at = args.headless && args.at < 0 ? 0 : args.at;
+        oo.hideLookups = args.noLookups;
         std::unique_ptr<Scene> scene = openScene(args.file, oo);
         strata::EngineDesc desc;
         desc.surface = args.headless ? STRATA_SURFACE_HEADLESS : STRATA_SURFACE_WINDOW;
@@ -217,6 +250,14 @@ int main(int argc, char** argv) {
                 if (!strips) throw std::runtime_error("--tour draws bit strips only");
                 tour(shell, *engine, *strips, args);
             }
+            if (!args.replayDir.empty()) {
+                auto* compile = dynamic_cast<CompileView*>(scene.get());
+                if (!compile) throw std::runtime_error("--replay draws an asn1-compile/1 trace only");
+                replay(shell, *engine, *compile, args);
+            }
+            if (auto* compile = dynamic_cast<CompileView*>(scene.get()))
+                std::printf("stage %s, step %d of %d\n", stageName(compile->replay().stage()),
+                            static_cast<int>(compile->replay().position()), compile->replay().steps());
             const std::string selected = selectionOf(*scene);
             if (!selected.empty()) std::printf("selected %s\n", selected.c_str());
             return 0;

@@ -13,12 +13,13 @@
 - **Schema city** ([RFC 0024](https://github.com/Preponderous-Software/rfcs/blob/main/rfcs/rfc_0024_asn1c_schema_city.md)): an ASN.1 specification as a city, one district
   per module and one building per type, with references and recursion drawn
   as lines.
-- **Compilation trace** ([RFC 0034](https://github.com/Preponderous-Software/rfcs/blob/main/rfcs/rfc_0034_asn1c_compilation_view.md)):
-  one asn1c run recorded stage by stage (parse, fix, compile, save), for a
-  view that replays it over the schema city. The trace (K0) is done; the
-  scene is in progress. See [The compile trace](#the-compile-trace).
+- **Compilation view** ([RFC 0034](https://github.com/Preponderous-Software/rfcs/blob/main/rfcs/rfc_0034_asn1c_compilation_view.md)):
+  one `asn1c` run replayed over the schema city, stage by stage. Buildings
+  rise as they are parsed, pulse as the fixer's passes visit them, and grow
+  floors of generated C, one band per compiler function that wrote it.
 
-RFCs 0023 and 0024 are implemented through their browser phases; see
+RFCs 0023 and 0024 are implemented through their browser phases, and RFC 0034
+through its trace (K0) and scene (K1); see
 [Status and follow-ups](#status-and-follow-ups). **Try it in a browser:**
 <https://asn1-viz.play.danielstephenson.dev>.
 
@@ -189,6 +190,56 @@ RFC 0034's Evidence was measured with a newer local asn1c build (7,812
 events, 24,489 lines, 26 functions, 268 skeletons); the fixer's busiest
 reporters and the PKIX print diff are the same at the pin.
 
+## The compilation view
+
+![One asn1c run over the PKIX modules: the city rises in parse order, pulses through 7,835 fixer events, grows floors of generated C, then copies 311 skeletons](docs/media/pkix-compile-replay.gif)
+
+```sh
+./build/asn1-viz datasets/demo/compile.json        # the demo module, played from the start
+./build/asn1-viz datasets/demo/compile.json --at 1 --pick Msg/emit_member_table
+```
+
+How `asn1c` turns a schema into C, replayed over the schema city from an
+`asn1-compile/1` trace ([RFC 0034](https://github.com/Preponderous-Software/rfcs/blob/main/rfcs/rfc_0034_asn1c_compilation_view.md)
+section 2). A scrubber along the bottom spans the four stages:
+
+- **Parse.** Each building starts as a flat footprint and rises when
+  `asn1p_parse_file` reaches its assignment, in source order.
+- **Fix.** A playhead walks the fixer's debug events (`-Wdebug-fixer`). The
+  building each event names pulses, coloured by pass family: dereference,
+  tagging, constraints, values, classes, lookup, or structure. **L** takes
+  the lookup events (`asn1f_lookup_symbol_impl`, `asn1f_find_terminal_thing`;
+  heavy traffic, not edits) off the timeline. Once the fixer is done with a
+  type whose printed form it changed (`-E` against `-E -F`), its roof gets a
+  pink mark, and the panel shows the first changed line before and after.
+  The panel names the current event as `function (Type) - asn1c source:line`.
+- **Compile.** Each building is replaced by a stack of floors, one band per
+  compiler function that emitted lines into its files
+  (`-debug-output-origin-lines`), each band as tall as its line count, grey at
+  the bottom for unannotated lines. Files no one type owns stand on their own
+  plot beside the city. Click a band for the function and its line count.
+- **Save.** The skeletons `asn1c` copies rather than generates fill a
+  "library" at the city's edge, one block per file, sized by its bytes.
+
+**Space** plays and pauses, **[** and **]** step a stage, **,** and **.**
+step one event (or assignment, file, skeleton), and dragging or clicking the
+scrubber seeks; **H** goes home and **F** focuses the selection. **C** is
+kept for compare mode (G4, phase K2). Every building, band, shared file and
+skeleton is pickable; the panel says what has happened to the picked type so
+far: its fixer events by family, its diff, and its generated lines by
+function. The scene stays within a handful of Strata meshes however big the
+schema is: one per district, one for the library and one for the marks, each
+rebuilt as the playhead moves.
+
+| | |
+|---|---|
+| ![PKIX in the Fix stage, Certificate selected](docs/media/pkix-compile-fix.png) | ![PKIX after the run: floors of generated C and the skeleton library](docs/media/pkix-compile-done.png) |
+| PKIX at fixer event 2,774 of 7,835: the newest visits pulse in their pass family's colour. | After the run: 254 files, 26,292 lines from 27 functions (`emit_member_table` 4,783 lines), and 311 skeletons copied. |
+
+The traces are `asn1-viz-compile-trace`'s (above): `datasets/demo/compile.json`
+is the one the browser page plays, and `datasets/pkix/compile.json` is the
+one in the pictures (`./build/asn1-viz datasets/pkix/compile.json`).
+
 ## In a browser
 
 The same views on Strata's WebGL 2 backend (Emscripten), with the committed
@@ -207,12 +258,14 @@ source /path/to/emsdk/emsdk_env.sh
 emcmake cmake -S . -B build-web -DCMAKE_BUILD_TYPE=Release -DASN1VIZ_WITH_STRATA=OFF -DASN1VIZ_WEB=ON
 cmake --build build-web -j8
 ctest --test-dir build-web                      # the model tests, as wasm under Node
-# serve build-web/asn1-viz.html (+ .js, .wasm, bench.js) as index.html; ?set=0..4 picks the dataset
+# serve build-web/asn1-viz.html (+ .js, .wasm, bench.js) as index.html; ?set=0..5 picks the dataset
 ```
 
-Five datasets sit behind the buttons: the certificate's bits, the canonical
-check, every PER element (the demo message), the PKIX city and the recursion
-city. Drag to orbit, right-drag or two fingers to pan, wheel or the +/-
+Six datasets sit behind the buttons: the certificate's bits, the canonical
+check, every PER element (the demo message), the PKIX city, the recursion
+city and the compilation replay of the demo module, with play, step and
+stage buttons and a range for the scrubber (the canvas's own scrubber takes
+a tap too). Drag to orbit, right-drag or two fingers to pan, wheel or the +/-
 buttons to zoom, and click or tap to pick. On a narrow screen the pick panel
 moves from the canvas into a sheet under it, and the canvas draws at most two
 pixels per CSS pixel. CI builds the page, runs the tests under Node, and
@@ -220,7 +273,8 @@ smoke-tests it in headless Chromium on a desktop, an iPhone 13 profile and a
 phone at device pixel ratio 2. Every dataset must open and draw, a real click
 or tap must change the selection, and a click or tap on a block must pick the
 same block as the page's own pick call at that point (device pixel ratios 1, 2
-and 3).
+and 3). The compilation replay must play, pause, step a stage, and seek from
+the range and from a click or tap on the canvas's scrubber.
 
 To measure the frame rate on a real device, open the page with `?bench`
 (<https://asn1-viz.play.danielstephenson.dev/?bench>). It flies one fixed
@@ -290,7 +344,7 @@ python3 tools/layout_png.py cert.layout.json cert.png      # a flat 2D look (Pil
 | `demo` | `tests/fixtures/demo.asn1` (written for this repository) | `tests/fixtures/demo-msg.xer` | `datasets/demo/msg.layout.json` |
 | `pkix` (city) | as above | | `datasets/pkix/schema.json` |
 | `recursion` (city) | the fork's `tests/tests-asn1c-compiler/92-circular-loops-OK.asn1` | | `datasets/recursion/schema.json` |
-| `pkix`, `demo` (compile trace) | as above | | `datasets/{pkix,demo}/compile.json`, with `schema.json` beside each |
+| `pkix`, `demo` (compile trace) | as above | | `datasets/{pkix,demo}/compile.json`, with `schema.json` beside each; the compilation view replays them |
 
 The committed layouts are what the pinned fork produces: CI regenerates them
 and fails if they differ (`cmake --build build --target update-datasets`
@@ -348,10 +402,13 @@ Local checkouts replace either download:
 | 0024 C1: model from `libasn1parser`/`libasn1fix`, SCCs | done (#5) |
 | 0024 C2: districts, buildings, references, recursion | done (#5) |
 | 0024 C3: cross-link with the strips | `file:line` in the strip view's pick panel (#5) |
-| 0034 K0: `asn1-viz-compile-trace`, `asn1-compile/1`, golden tests, `codeBytes` | done |
-| 0034 K1–K3: scrubber scene, compare mode, browser | not started here (K1 in progress separately) |
+| 0034 K0: `asn1-viz-compile-trace`, `asn1-compile/1`, golden tests, `codeBytes` | done (#13) |
+| 0034 K1: scene: stage scrubber, pulses, diff marks, floors, skeleton library, picking (native and browser) | done |
+| 0034 K2: compare mode (G4) | not started; **C** is reserved for it |
+| 0034 K3: browser datasets (PKIX), README pipeline diagram | the demo trace is in the page; PKIX is not yet |
 
 Follow-ups, not done here:
+
 
 - **Datasets:** LTE RRC (3GPP TS 36.331) and ETSI ITS CAM/DENM, once their
   redistribution terms are confirmed (RFC 0023 OQ3/OQ4). The fork's UMTS RRC
