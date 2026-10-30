@@ -1,5 +1,6 @@
 #include "model/compile.h"
 
+#include <algorithm>
 #include <stdexcept>
 
 #include "model/schema.h"
@@ -78,6 +79,22 @@ std::vector<int> CompileTrace::eventsOf(int type) const {
     return out;
 }
 
+std::vector<std::pair<std::string, int>> CompileTrace::originsOf(const std::vector<int>& which, const std::string& fn,
+                                                                  size_t n) const {
+    std::map<std::string, int> lines;
+    for (int i : which) {
+        if (i < 0 || i >= static_cast<int>(files.size())) continue;
+        for (const auto& [src, count] : files[static_cast<size_t>(i)].bySrc) {
+            const auto it = sources.find(src);
+            if (it != sources.end() && it->second == fn) lines[src] += count;
+        }
+    }
+    std::vector<std::pair<std::string, int>> out(lines.begin(), lines.end());
+    std::stable_sort(out.begin(), out.end(), [](const auto& a, const auto& b) { return a.second > b.second; });
+    if (out.size() > n) out.resize(n);
+    return out;
+}
+
 bool CompileTrace::matches(const Schema& s) const {
     const int n = static_cast<int>(s.types.size());
     auto ok = [n](int t) { return t >= -1 && t < n; };
@@ -129,6 +146,8 @@ CompileTrace loadCompileTrace(const json::Value& doc) {
     const json::Value& comp = doc.get("compile");
     t.compileStatus = comp.str("status");
     t.functions = strings(comp.get("functions"));
+    if (comp.get("sources").isObject())
+        for (const auto& [k, v] : comp.at("sources").members()) t.sources[k] = v.asString();
     if (comp.get("files").isArray())
         for (const json::Value& f : comp.at("files").items()) {
             CompileFile cf;

@@ -119,6 +119,21 @@ int main(int argc, char** argv) {
         CHECK(files.size() == 2);
         for (int f : files) CHECK(t.files[static_cast<size_t>(f)].path.rfind("Certificate.", 0) == 0);
         CHECK(s.types[static_cast<size_t>(cert)].codeBytes > 0);
+        // A band's origins (RFC 0034 section 3): every source line the trace
+        // saw belongs to one function, so a file's bySrc lines in a function
+        // add up to its byFn count; a band's top five are the busiest first.
+        CHECK(!t.sources.empty());
+        for (size_t f = 0; f < t.files.size(); ++f)
+            for (const auto& [fn, n] : t.files[f].byFn) {
+                int sum = 0;
+                for (const auto& [src, k] : t.originsOf({static_cast<int>(f)}, fn, 1000)) sum += k;
+                CHECK(sum == n);
+            }
+        const auto top = t.originsOf(files, "emit_member_table", 5);
+        CHECK(!top.empty() && top.size() <= 5);
+        for (size_t i = 1; i < top.size(); ++i) CHECK(top[i - 1].second >= top[i].second);
+        for (const auto& [src, n] : top) CHECK(t.sources.at(src) == "emit_member_table" && n > 0);
+        CHECK(t.originsOf(files, "no_such_function", 5).empty());
         // Every phase_1_1 marker names the assignment it attributes.
         for (const CompileEvent& e : t.events)
             if (e.how == "processing" && e.type >= 0) CHECK(s.types[static_cast<size_t>(e.type)].name == e.expr);

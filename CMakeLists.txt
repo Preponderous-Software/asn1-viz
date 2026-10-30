@@ -328,10 +328,15 @@ if(ASN1VIZ_WEB)
   target_link_options(asn1-viz-web PRIVATE
     -sSTACK_SIZE=1MB
     "-sEXPORTED_FUNCTIONS=_main,_asn1viz_open,_asn1viz_resize,_asn1viz_key,_asn1viz_zoom,_asn1viz_click,_asn1viz_status,_asn1viz_bench_view,_asn1viz_seek,_asn1viz_compare"
-    -sEXPORTED_RUNTIME_METHODS=ccall,cwrap,UTF8ToString
-    "--embed-file=${CMAKE_CURRENT_SOURCE_DIR}/datasets@/datasets"
-    # PKIX's comparison trace is for the desktop; the page compares the demo.
+    -sEXPORTED_RUNTIME_METHODS=ccall,cwrap,UTF8ToString,FS
+    # Not built in: the PKIX compile trace (1.4 MB) and the demo's comparison
+    # trace, which the page fetches (pkix-compile.json and
+    # demo-compile-no-gen-OER.json, beside the page) only when they are
+    # wanted; PKIX's comparison trace is for the desktop only.
+    "--exclude-file=*/pkix/compile.json"
+    "--exclude-file=*/demo/compile-no-gen-OER.json"
     "--exclude-file=*/pkix/compile-fwide-types.json"
+    "--embed-file=${CMAKE_CURRENT_SOURCE_DIR}/datasets@/datasets"
     "--shell-file=${CMAKE_CURRENT_SOURCE_DIR}/web/shell.html")
   set_property(TARGET asn1-viz-web APPEND PROPERTY LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/web/shell.html" ${ASN1VIZ_WEB_DATA})
   # The loading shell (web/strata-kit, vendored from Strata) and its bridge go
@@ -346,4 +351,7 @@ if(ASN1VIZ_WEB)
     VERBATIM)
   # The page's ?bench mode (web/bench.js) is served next to it.
   configure_file(web/bench.js "${CMAKE_CURRENT_BINARY_DIR}/bench.js" COPYONLY)
+  # The traces the page fetches on demand (see above).
+  configure_file(datasets/pkix/compile.json "${CMAKE_CURRENT_BINARY_DIR}/pkix-compile.json" COPYONLY)
+  configure_file(datasets/demo/compile-no-gen-OER.json "${CMAKE_CURRENT_BINARY_DIR}/demo-compile-no-gen-OER.json" COPYONLY)
 endif()

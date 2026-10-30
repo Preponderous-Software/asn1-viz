@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <map>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "model/json.h"
@@ -62,6 +63,8 @@ struct CompileTrace {
     std::string compileStatus;
     std::vector<CompileFile> files;
     std::vector<std::string> functions;  // busiest first
+    // "asn1c_C.c:4166" -> the function it is in (additive; empty in older traces).
+    std::map<std::string, std::string> sources;
 
     std::string saveStatus;
     std::vector<CompileCopied> skeletons, generated;
@@ -73,6 +76,11 @@ struct CompileTrace {
     int annotatedLines() const;
     std::vector<int> filesOf(int type) const;   // indexes into files
     std::vector<int> eventsOf(int type) const;  // indexes into events
+    // A band's origins: the compiler source lines in function `fn` that wrote
+    // lines into `files` (indexes into files), busiest first (ties by name),
+    // at most `n`. Empty when the trace has no `sources`.
+    std::vector<std::pair<std::string, int>> originsOf(const std::vector<int>& files, const std::string& fn,
+                                                        size_t n) const;
     // Every type id in the trace names a type of `schema`.
     bool matches(const Schema& schema) const;
 };
